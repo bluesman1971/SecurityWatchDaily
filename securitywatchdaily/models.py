@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 
 
 VALID_PRIORITIES = {"Critical", "High", "Medium", "Watch", "Info"}
+MATCH_CONFIDENCES = {"confirmed affected", "likely affected", "needs review", "not affected", "unknown"}
 
 
 @dataclass(frozen=True)
@@ -50,6 +51,8 @@ class Finding:
     trace_status: str = "new"
     epss_score: str = ""
     epss_percentile: str = ""
+    id: int | None = None
+    run_id: str = ""
 
 
 @dataclass(frozen=True)
@@ -61,3 +64,68 @@ class RunRecord:
     suppressed_count: int
     collected_count: int
     source_status: dict[str, str]
+
+
+@dataclass(frozen=True)
+class Asset:
+    id: int | None
+    hostname: str
+    owner: str = ""
+    location: str = ""
+    asset_type: str = ""
+    platform: str = ""
+    last_seen: str = ""
+
+
+@dataclass(frozen=True)
+class AssetComponent:
+    id: int | None
+    asset_id: int
+    component_type: str
+    vendor: str
+    product: str
+    version: str = ""
+    platform: str = ""
+    normalized_vendor: str = ""
+    normalized_product: str = ""
+
+
+@dataclass(frozen=True)
+class ProductAlias:
+    id: int | None
+    raw_vendor: str
+    raw_product: str
+    normalized_vendor: str
+    normalized_product: str
+    platform: str = ""
+
+
+@dataclass(frozen=True)
+class FindingProduct:
+    id: int | None
+    finding_id: int
+    vendor: str
+    product: str
+    platform: str = ""
+    source: str = "inferred"
+
+
+@dataclass(frozen=True)
+class FindingVersionRange:
+    id: int | None
+    finding_product_id: int
+    affected_min_version: str = ""
+    affected_max_version: str = ""
+    fixed_version: str = ""
+    exact_version: str = ""
+
+
+@dataclass(frozen=True)
+class FindingAssetMatch:
+    id: int | None
+    finding_id: int
+    asset_id: int
+    asset_component_id: int | None
+    confidence: str
+    reason: str
+    review_state: str = ""

@@ -18,11 +18,12 @@ SecurityWatchDaily is split into small modules so collection, matching, storage,
 4. Findings are deduplicated by key.
 5. Trace state suppresses unchanged findings.
 6. Runs and findings are saved for local review.
-7. The web UI reads the same database as the CLI.
+7. Finding products and asset matches are refreshed from the saved run data.
+8. The web UI reads the same database as the CLI.
 
 ## Trust Boundary
 
-External source content is untrusted. It is parsed into structured findings and escaped before browser rendering.
+External source content and imported CSV inventory content are untrusted. They are parsed into structured records, validated at import boundaries, stored with parameterized SQLite statements, and escaped before browser rendering.
 
 The first version is local-only and has no authentication. Do not expose it directly to a network until auth, authorization, CSRF protection, deployment settings, and logging rules are reviewed under the Strict profile.
 
@@ -64,6 +65,8 @@ Phase 2 should add asset impact matching through CSV import before adding direct
 
 The internal model should separate assets from asset components so endpoints, installed software, hardware, firmware, operating systems, and services can all be matched against findings.
 
+CSV import is intentionally local and bounded. Each row represents one component on one asset, and re-importing a hostname replaces that asset's component list so stale software rows do not silently accumulate.
+
 Planned phase 2 entities:
 
 - `assets`
@@ -74,6 +77,8 @@ Planned phase 2 entities:
 - `finding_asset_matches`
 
 The UI should show match confidence rather than treating every product-name match as confirmed impact.
+
+The current matching flow stores normalized product aliases, inferred finding products, optional structured version ranges, and materialized finding-asset matches. Product-only matches are labeled as likely affected, missing asset versions with known ranges are labeled as needs review, and structured version hits can become confirmed affected or not affected.
 
 ### Connector catalog for phase 3
 

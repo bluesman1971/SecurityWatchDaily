@@ -13,6 +13,7 @@ from securitywatchdaily.repositories.runs import save_run
 from securitywatchdaily.repositories.sources import list_sources
 
 from .finding_service import deduplicate_findings, make_finding
+from .asset_matching_service import refresh_asset_matches_for_run
 from .trace_service import apply_trace
 
 
@@ -81,4 +82,5 @@ def run_watch(conn: sqlite3.Connection, *, offline_sample: bool = False, force_v
         source_status=source_status,
     )
     save_run(conn, record, findings)
+    refresh_asset_matches_for_run(conn, record.run_id)
     return record

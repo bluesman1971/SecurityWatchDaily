@@ -30,6 +30,7 @@ from securitywatchdaily.repositories.connectors import (
     get_connector,
     save_asset_mapping,
     save_connector,
+    update_connector_settings,
 )
 from securitywatchdaily.repositories.runs import latest_run
 from securitywatchdaily.services.asset_matching_service import refresh_asset_matches_for_run
@@ -37,6 +38,43 @@ from securitywatchdaily.services.normalization_service import normalize_pair, no
 
 
 MAX_FIELD_LENGTH = 255
+ENV_VAR_PATTERN = re.compile(r"^[A-Z_][A-Z0-9_]{0,80}$")
+GUID_PATTERN = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+INTUNE_PERMISSION = "DeviceManagementManagedDevices.Read.All"
+INTUNE_CLOUDS = {
+    "global": {
+        "label": "Global - graph.microsoft.com",
+        "authority_host": "https://login.microsoftonline.com",
+        "graph_host": "https://graph.microsoft.com",
+    },
+    "usgov_l4": {
+        "label": "US Government L4",
+        "authority_host": "https://login.microsoftonline.us",
+        "graph_host": "https://graph.microsoft.us",
+    },
+    "usgov_l5": {
+        "label": "US Government L5",
+        "authority_host": "https://login.microsoftonline.us",
+        "graph_host": "https://dod-graph.microsoft.us",
+    },
+    "china": {
+        "label": "China operated by 21Vianet",
+        "authority_host": "https://login.chinacloudapi.cn",
+        "graph_host": "https://microsoftgraph.chinacloudapi.cn",
+    },
+}
+DEFAULT_INTUNE_SETTINGS = {
+    "display_name": "Corporate Intune",
+    "cloud": "global",
+    "tenant_id": "",
+    "client_id": "",
+    "tenant_env_var": "INTUNE_TENANT_ID",
+    "client_env_var": "INTUNE_CLIENT_ID",
+    "secret_env_var": "INTUNE_CLIENT_SECRET",
+    "graph_permissions": [INTUNE_PERMISSION],
+    "read_only": True,
+    "secret_storage": "environment",
+}
 
 
 @dataclass(frozen=True)
@@ -120,10 +158,9 @@ CONNECTOR_CATALOG = [
         description="Read-only Intune connector shell for managed devices and detected applications.",
         settings_json=json.dumps(
             {
-                "env": ["INTUNE_TENANT_ID", "INTUNE_CLIENT_ID"],
-                "optional_env": ["INTUNE_CLIENT_SECRET"],
-                "graph_permissions": ["DeviceManagementManagedDevices.Read.All", "DeviceManagementApps.Read.All"],
-                "read_only": True,
+                **DEFAULT_INTUNE_SETTINGS,
+                "tenant_id": "",
+                "client_id": "",
             },
             sort_keys=True,
         ),
@@ -154,7 +191,8 @@ def test_connector(conn: sqlite3.Connection, connector_id: str) -> ConnectorActi
         if connector.connector_type == "jamf":
             validate_jamf_setup()
         if connector.connector_type == "intune":
-            validate_intune_setup()
+            settings = intune_settings_from_connector(connector)
+            validate_intune_setup(settings)
     except AppError as exc:
         return ConnectorActionResult(False, exc.detail or exc.message)
     return ConnectorActionResult(
@@ -267,12 +305,13 @@ def collect_records(connector: Connector) -> list[ConnectorAssetRecord]:
             ),
         )
     if connector.connector_type == "intune":
-        validate_intune_setup()
+        settings = intune_settings_from_connector(connector)
+        validate_intune_setup(settings)
         raise ConfigValidationError(
             "Intune live sync is not implemented yet.",
             detail=(
-                "Microsoft Graph OAuth and tenant consent need a broader auth design. Required read permissions are "
-                "DeviceManagementManagedDevices.Read.All and DeviceManagementApps.Read.All."
+                "Microsoft Graph OAuth and tenant consent need the next connector slice. Required read permission is "
+                f"{INTUNE_PERMISSION}."
             ),
         )
     raise ConfigValidationError("Connector type is not supported.", detail=connector.connector_type)
@@ -506,12 +545,82 @@ def validate_jamf_setup() -> None:
         )
 
 
-def validate_intune_setup() -> None:
-    missing = [
-        name
-        for name in ("INTUNE_TENANT_ID", "INTUNE_CLIENT_ID")
-        if not os.environ.get(name, "").strip()
-    ]
+def intune_settings_from_connector(connector: Connector) -> dict[str, object]:
+    try:
+        raw = json.loads(connector.settings_json or "{}")
+    except json.JSONDecodeError:
+        raw = {}
+    settings = {**DEFAULT_INTUNE_SETTINGS, **raw}
+    if settings.get("cloud") not in INTUNE_CLOUDS:
+        settings["cloud"] = DEFAULT_INTUNE_SETTINGS["cloud"]
+    settings["graph_permissions"] = [INTUNE_PERMISSION]
+    settings["read_only"] = True
+    settings["secret_storage"] = "environment"
+    return settings
+
+
+def build_intune_settings(form: dict[str, str]) -> dict[str, object]:
+    settings = {
+        **DEFAULT_INTUNE_SETTINGS,
+        "display_name": form.get("display_name", "").strip() or DEFAULT_INTUNE_SETTINGS["display_name"],
+        "cloud": form.get("cloud", DEFAULT_INTUNE_SETTINGS["cloud"]).strip(),
+        "tenant_id": form.get("tenant_id", "").strip(),
+        "client_id": form.get("client_id", "").strip(),
+        "tenant_env_var": form.get("tenant_env_var", DEFAULT_INTUNE_SETTINGS["tenant_env_var"]).strip(),
+        "client_env_var": form.get("client_env_var", DEFAULT_INTUNE_SETTINGS["client_env_var"]).strip(),
+        "secret_env_var": form.get("secret_env_var", DEFAULT_INTUNE_SETTINGS["secret_env_var"]).strip(),
+    }
+    validate_intune_settings(settings)
+    return settings
+
+
+def save_intune_settings(conn: sqlite3.Connection, form: dict[str, str]) -> dict[str, object]:
+    settings = build_intune_settings(form)
+    update_connector_settings(conn, "intune", json.dumps(settings, sort_keys=True))
+    return settings
+
+
+def validate_intune_settings(settings: dict[str, object]) -> None:
+    for field in ("display_name", "tenant_id", "client_id", "tenant_env_var", "client_env_var", "secret_env_var"):
+        value = str(settings.get(field, "") or "")
+        if len(value) > MAX_FIELD_LENGTH:
+            raise ConfigValidationError("Intune setup is invalid.", detail=f"{field} must be 255 characters or fewer.")
+    if settings.get("cloud") not in INTUNE_CLOUDS:
+        raise ConfigValidationError("Intune cloud is invalid.", detail="Choose one of the supported Microsoft Graph clouds.")
+    if settings.get("tenant_id") and not GUID_PATTERN.match(str(settings["tenant_id"])):
+        raise ConfigValidationError("Tenant ID is invalid.", detail="Use the Microsoft Entra tenant GUID.")
+    if settings.get("client_id") and not GUID_PATTERN.match(str(settings["client_id"])):
+        raise ConfigValidationError("Client ID is invalid.", detail="Use the app registration client GUID.")
+    for field in ("tenant_env_var", "client_env_var", "secret_env_var"):
+        if not ENV_VAR_PATTERN.match(str(settings.get(field, ""))):
+            raise ConfigValidationError(
+                "Environment variable name is invalid.",
+                detail=f"{field} must use uppercase letters, numbers, and underscores.",
+            )
+
+
+def intune_env_export(settings: dict[str, object]) -> str:
+    tenant_value = str(settings.get("tenant_id", "") or "00000000-0000-0000-0000-000000000000")
+    client_value = str(settings.get("client_id", "") or "11111111-1111-1111-1111-111111111111")
+    tenant_env = str(settings.get("tenant_env_var", DEFAULT_INTUNE_SETTINGS["tenant_env_var"]))
+    client_env = str(settings.get("client_env_var", DEFAULT_INTUNE_SETTINGS["client_env_var"]))
+    secret_env = str(settings.get("secret_env_var", DEFAULT_INTUNE_SETTINGS["secret_env_var"]))
+    return "\n".join(
+        [
+            f'export {tenant_env}="{tenant_value}"',
+            f'export {client_env}="{client_value}"',
+            f'export {secret_env}="[enter locally]"',
+        ]
+    )
+
+
+def validate_intune_setup(settings: dict[str, object] | None = None) -> None:
+    settings = {**DEFAULT_INTUNE_SETTINGS, **(settings or {})}
+    validate_intune_settings(settings)
+    tenant_env = str(settings["tenant_env_var"])
+    client_env = str(settings["client_env_var"])
+    secret_env = str(settings["secret_env_var"])
+    missing = [name for name in (tenant_env, client_env, secret_env) if not os.environ.get(name, "").strip()]
     if missing:
         raise ConfigValidationError(
             "Intune setup is incomplete.",

@@ -33,7 +33,16 @@ from securitywatchdaily.repositories.runs import get_finding, latest_run, list_f
 from securitywatchdaily.repositories.sources import list_sources, save_source, set_source_enabled
 from securitywatchdaily.services.asset_import_service import csv_template, import_inventory_csv
 from securitywatchdaily.services.asset_matching_service import refresh_asset_matches_for_run
-from securitywatchdaily.services.connector_service import seed_connector_catalog, sync_connector, test_connector
+from securitywatchdaily.services.connector_service import (
+    INTUNE_CLOUDS,
+    INTUNE_PERMISSION,
+    intune_env_export,
+    intune_settings_from_connector,
+    save_intune_settings,
+    seed_connector_catalog,
+    sync_connector,
+    test_connector,
+)
 from securitywatchdaily.services.import_service import seed_defaults
 from securitywatchdaily.services.run_service import run_watch
 from securitywatchdaily.validation import split_csv
@@ -85,6 +94,9 @@ class SecurityWatchHandler(BaseHTTPRequestHandler):
                 "/api/health": self.health,
             }
             handler = routes.get(parsed.path)
+            if parsed.path == "/connectors/intune/setup":
+                self.intune_setup_form()
+                return
             if not handler and parsed.path.startswith("/connectors/"):
                 self.connector_detail(parsed.path)
                 return
@@ -127,6 +139,8 @@ class SecurityWatchHandler(BaseHTTPRequestHandler):
                 self.test_connector_action(form)
             elif parsed.path == "/connectors/sync":
                 self.sync_connector_action(form)
+            elif parsed.path == "/connectors/intune/settings":
+                self.save_intune_connector_settings(form)
             else:
                 self.redirect("/")
         except AppError as exc:
@@ -368,6 +382,9 @@ class SecurityWatchHandler(BaseHTTPRequestHandler):
                 return
             runs = list_sync_runs(conn, connector_id)
             latest_errors = list_import_errors(conn, int(runs[0]["id"])) if runs else []
+        setup_action = ""
+        if connector.connector_type == "intune":
+            setup_action = '<a class="button" href="/connectors/intune/setup">Configure Intune</a>'
         run_rows = "".join(
             f"<tr><td>{esc(row['started_at'])}</td><td>{badge(row['status'])}</td><td>{esc(row['action'])}</td><td>{row['imported_asset_count']} / {row['imported_component_count']}</td><td>{esc(row['error'])}</td></tr>"
             for row in runs
@@ -390,6 +407,7 @@ class SecurityWatchHandler(BaseHTTPRequestHandler):
         <section class="panel">
           <h2>Actions</h2>
           <div class="actions">
+            {setup_action}
             <form method="post" action="/connectors/toggle"><input type="hidden" name="id" value="{esc(connector.id)}"><input type="hidden" name="enabled" value="{'0' if connector.enabled else '1'}"><button class="secondary">{'Disable' if connector.enabled else 'Enable'}</button></form>
             <form method="post" action="/connectors/test"><input type="hidden" name="id" value="{esc(connector.id)}"><button class="secondary">Test connector</button></form>
             <form method="post" action="/connectors/sync"><input type="hidden" name="id" value="{esc(connector.id)}"><button>Sync now</button></form>
@@ -401,6 +419,79 @@ class SecurityWatchHandler(BaseHTTPRequestHandler):
         <section class="panel"><h2>Latest import errors</h2><div class="table-wrap"><table><thead><tr><th>External ID</th><th>Field</th><th>Issue</th></tr></thead><tbody>{error_rows or "<tr><td colspan='3'>No import errors for the latest run.</td></tr>"}</tbody></table></div></section>
         """
         self.respond(page(connector.name, body, flash=flash, error=error))
+
+    def intune_setup_form(self, *, flash: str = "", error: str = "") -> None:
+        with self.context.connection() as conn:
+            connector = get_connector(conn, "intune")
+            if not connector:
+                self.respond(page("Not found", "<section class='panel'><h1>Connector not found</h1></section>"), HTTPStatus.NOT_FOUND)
+                return
+            settings = intune_settings_from_connector(connector)
+        cloud_options = "".join(
+            f"<option value='{esc(key)}' {'selected' if key == settings['cloud'] else ''}>{esc(value['label'])}</option>"
+            for key, value in INTUNE_CLOUDS.items()
+        )
+        env_output = intune_env_export(settings)
+        body = f"""
+        <section class="hero">
+          <div>
+            <h1>Add Microsoft Intune</h1>
+            <p class="muted">Connect read-only device inventory from Microsoft Graph while keeping credentials local.</p>
+          </div>
+          <div class="actions">
+            <a class="button secondary" href="/connectors/intune">Back to connector</a>
+          </div>
+        </section>
+        <div class="setup-layout">
+          <aside class="setup-steps" aria-label="Setup steps">
+            <div class="setup-step done"><span class="setup-step-number">1</span><div><b>Connector</b><p class="muted">Microsoft Intune selected</p></div></div>
+            <div class="setup-step current"><span class="setup-step-number">2</span><div><b>Azure app</b><p class="muted">Tenant and app registration</p></div></div>
+            <div class="setup-step"><span class="setup-step-number">3</span><div><b>Secret</b><p class="muted">Local-only credential handling</p></div></div>
+            <div class="setup-step"><span class="setup-step-number">4</span><div><b>Verify</b><p class="muted">Test read-only Graph access</p></div></div>
+          </aside>
+          <div>
+            <section class="panel">
+              <div class="notice">Only non-secret connector settings are saved. Client secrets stay in local environment variables or future local-only secret handling.</div>
+              <h2>Azure app registration</h2>
+              <p class="muted">Use a dedicated app registration with admin consent for the least-privileged read permission.</p>
+              <form class="stack" method="post" action="/connectors/intune/settings">
+                <div class="two">
+                  <label>Connector name<input name="display_name" value="{esc(settings['display_name'])}" maxlength="255"><span class="muted">Shown on this setup screen.</span></label>
+                  <label>Microsoft cloud<select name="cloud">{cloud_options}</select><span class="muted">Defaults to the public Microsoft Graph cloud.</span></label>
+                </div>
+                <div class="two">
+                  <label>Tenant ID<input name="tenant_id" value="{esc(settings['tenant_id'])}" placeholder="00000000-0000-0000-0000-000000000000" maxlength="255"><span class="muted">Directory tenant ID from Microsoft Entra admin center.</span></label>
+                  <label>Client ID<input name="client_id" value="{esc(settings['client_id'])}" placeholder="11111111-1111-1111-1111-111111111111" maxlength="255"><span class="muted">Application client ID from the app registration.</span></label>
+                </div>
+                <label>Required application permission<input value="{esc(INTUNE_PERMISSION)}" readonly><span class="muted">Grant admin consent before testing the connector.</span></label>
+                <h2>Credential handling</h2>
+                <div class="secret-note">The app reads these environment variable names at test and sync time. It does not store the client secret value.</div>
+                <div class="two">
+                  <label>Tenant env var<input name="tenant_env_var" value="{esc(settings['tenant_env_var'])}" maxlength="81"></label>
+                  <label>Client ID env var<input name="client_env_var" value="{esc(settings['client_env_var'])}" maxlength="81"></label>
+                </div>
+                <label>Client secret env var<input name="secret_env_var" value="{esc(settings['secret_env_var'])}" maxlength="81"><span class="muted">Put the real secret in your shell or local service environment, not in this app.</span></label>
+                <h2>Generated local setup</h2>
+                <pre class="code">{esc(env_output)}</pre>
+                <div class="actions">
+                  <button>Save settings</button>
+                  <button class="secondary" formaction="/connectors/test" name="id" value="intune">Test connector</button>
+                </div>
+              </form>
+            </section>
+            <section class="panel">
+              <h2>Test before enabling</h2>
+              <div class="source-status">
+                <div class="source-card"><b>Settings</b><p class="muted">Tenant ID, client ID, env var names, cloud, and permission are validated before saving.</p></div>
+                <div class="source-card"><b>Secrets</b><p class="muted">The client secret value is read from the configured environment variable only during test or sync.</p></div>
+                <div class="source-card"><b>Read-only</b><p class="muted">The connector is designed for Microsoft Graph inventory reads and does not mutate Intune.</p></div>
+                <div class="source-card"><b>Fallback</b><p class="muted">CSV import remains available if Graph permissions or tenant setup need work.</p></div>
+              </div>
+            </section>
+          </div>
+        </div>
+        """
+        self.respond(page("Configure Intune", body, flash=flash, error=error))
 
     def asset_import_form(self) -> None:
         body = f"""
@@ -565,6 +656,11 @@ class SecurityWatchHandler(BaseHTTPRequestHandler):
             )
         else:
             self.connector_detail(f"/connectors/{connector_id}", error=result.message)
+
+    def save_intune_connector_settings(self, form: dict[str, str]) -> None:
+        with self.context.connection() as conn:
+            save_intune_settings(conn, form)
+        self.intune_setup_form(flash="Intune connector settings saved. Set the local secret env var before testing.")
 
 
 def serve(host: str = "127.0.0.1", port: int = 8765, db_path: Path | None = None) -> ThreadingHTTPServer:

@@ -124,6 +124,37 @@ class WebTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertIn("connector-laptop-1", assets)
 
+    def test_intune_setup_page_saves_non_secret_settings(self):
+        status, detail = self.request("GET", "/connectors/intune")
+        self.assertEqual(status, 200)
+        self.assertIn("Configure Intune", detail)
+
+        status, setup = self.request("GET", "/connectors/intune/setup")
+        self.assertEqual(status, 200)
+        self.assertIn("Add Microsoft Intune", setup)
+        self.assertIn("DeviceManagementManagedDevices.Read.All", setup)
+        self.assertIn("INTUNE_CLIENT_SECRET", setup)
+
+        body = (
+            "display_name=Corporate+Intune&cloud=global&"
+            "tenant_id=22222222-2222-2222-2222-222222222222&"
+            "client_id=33333333-3333-3333-3333-333333333333&"
+            "tenant_env_var=ACME_INTUNE_TENANT_ID&"
+            "client_env_var=ACME_INTUNE_CLIENT_ID&"
+            "secret_env_var=ACME_INTUNE_CLIENT_SECRET&"
+            "client_secret=do-not-store-this"
+        )
+        status, saved = self.request(
+            "POST",
+            "/connectors/intune/settings",
+            body=body,
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+        self.assertEqual(status, 200)
+        self.assertIn("Intune connector settings saved", saved)
+        self.assertIn("ACME_INTUNE_CLIENT_SECRET", saved)
+        self.assertNotIn("do-not-store-this", saved)
+
 
 if __name__ == "__main__":
     unittest.main()

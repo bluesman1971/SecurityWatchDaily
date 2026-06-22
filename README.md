@@ -64,7 +64,7 @@ Notes:
 
 Use **Connectors** in the local web UI to view available inventory connectors, enable or disable them, test setup, and run syncs. Phase 3 starts with a working **Sample Inventory** connector that imports deterministic fixture assets into the same asset/component model used by CSV import.
 
-Freshservice, Jamf, and Microsoft Intune are present as read-only connector shells with setup validation and actionable errors. Credentials are read from local environment variables and are not stored in SQLite, rendered in the browser, or committed.
+Freshservice, Jamf, and Microsoft Intune are present as read-only connector shells with setup validation and actionable errors. Intune includes a setup page for tenant/client metadata and local environment variable names. Credentials are read from local environment variables and are not stored in SQLite, rendered in the browser, or committed.
 
 Connector setup variables:
 
@@ -75,9 +75,10 @@ FRESHSERVICE_TEST_PATH=/api/v2/assets
 JAMF_BASE_URL=https://yourcompany.jamfcloud.com
 INTUNE_TENANT_ID=tenant-id
 INTUNE_CLIENT_ID=client-id
+INTUNE_CLIENT_SECRET=local-client-secret
 ```
 
-Freshservice `403` means the API key authenticated but is not authorized for the requested module. Freshservice `404` usually means the tenant-specific endpoint path does not match. Intune live sync is intentionally deferred until Microsoft Graph OAuth and tenant consent are designed.
+Freshservice `403` means the API key authenticated but is not authorized for the requested module. Freshservice `404` usually means the tenant-specific endpoint path does not match. Intune setup stores only non-secret metadata and expects the Microsoft Graph application permission `DeviceManagementManagedDevices.Read.All`. Intune live sync is intentionally deferred until Microsoft Graph OAuth and tenant consent are implemented.
 
 ## Planning Docs
 

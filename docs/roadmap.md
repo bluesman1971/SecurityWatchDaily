@@ -106,7 +106,7 @@ First vertical slice:
 
 - `Sample Inventory` proves connector sync, health/status persistence, import-error persistence, asset/component import, external-ID mapping, and asset-match refresh without external credentials.
 - Freshservice validates environment setup and can perform a read-only endpoint check when `FRESHSERVICE_TEST_PATH` is supplied. Tenant-specific asset/software sync remains deferred until the correct endpoint paths and permissions are confirmed.
-- Jamf and Intune are cataloged as read-only connector shells with setup guidance. Intune live sync is deferred until Microsoft Graph OAuth and tenant consent are designed.
+- Jamf is cataloged as a read-only connector shell with setup guidance. Intune now has a setup page for non-secret Microsoft Graph tenant/client metadata and local env-var names; live sync is deferred until Microsoft Graph OAuth and tenant consent are implemented.
 
 ## Later Possibilities
 

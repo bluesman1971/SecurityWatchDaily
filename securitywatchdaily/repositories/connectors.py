@@ -49,7 +49,6 @@ def save_connector(conn: sqlite3.Connection, connector: Connector) -> None:
           name=excluded.name,
           connector_type=excluded.connector_type,
           description=excluded.description,
-          settings_json=excluded.settings_json,
           updated_at=CURRENT_TIMESTAMP
         """,
         (
@@ -66,6 +65,18 @@ def save_connector(conn: sqlite3.Connection, connector: Connector) -> None:
             connector.imported_component_count,
         ),
     )
+
+
+def update_connector_settings(conn: sqlite3.Connection, connector_id: str, settings_json: str) -> None:
+    conn.execute(
+        """
+        UPDATE connectors
+        SET settings_json = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+        """,
+        (settings_json, connector_id),
+    )
+    conn.commit()
 
 
 def set_connector_enabled(conn: sqlite3.Connection, connector_id: str, enabled: bool) -> None:

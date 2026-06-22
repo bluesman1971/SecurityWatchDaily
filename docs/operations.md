@@ -33,6 +33,7 @@ export FRESHSERVICE_TEST_PATH="/api/v2/assets"
 export JAMF_BASE_URL="https://yourcompany.jamfcloud.com"
 export INTUNE_TENANT_ID="tenant-id"
 export INTUNE_CLIENT_ID="client-id"
+export INTUNE_CLIENT_SECRET="local-client-secret"
 ```
 
 Freshservice connector notes:
@@ -49,7 +50,9 @@ Jamf connector notes:
 Intune connector notes:
 
 - Live sync is deferred until Microsoft Graph OAuth and tenant consent are designed.
-- Expected read permissions are `DeviceManagementManagedDevices.Read.All` and `DeviceManagementApps.Read.All`.
+- Use **Connectors > Microsoft Intune > Configure Intune** to save tenant/client metadata and the local environment variable names.
+- Expected read permission is `DeviceManagementManagedDevices.Read.All`.
+- The client secret value belongs only in the local environment variable named on the setup page.
 
 ## Troubleshooting
 

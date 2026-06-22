@@ -21,6 +21,7 @@ from securitywatchdaily.services.connector_service import (
     ConnectorComponentRecord,
     import_connector_records,
     seed_connector_catalog,
+    save_intune_settings,
     sync_connector,
     test_connector,
 )
@@ -55,6 +56,53 @@ class ConnectorTests(unittest.TestCase):
         self.assertFalse(result.success)
         self.assertIn("FRESHSERVICE_TENANT_URL", result.message)
         self.assertNotIn("API key:", result.message)
+
+    def test_intune_settings_save_non_secret_values_and_survive_catalog_seed(self):
+        conn = self.make_conn()
+        settings = save_intune_settings(
+            conn,
+            {
+                "display_name": "Corporate Intune",
+                "cloud": "global",
+                "tenant_id": "22222222-2222-2222-2222-222222222222",
+                "client_id": "33333333-3333-3333-3333-333333333333",
+                "tenant_env_var": "ACME_INTUNE_TENANT_ID",
+                "client_env_var": "ACME_INTUNE_CLIENT_ID",
+                "secret_env_var": "ACME_INTUNE_CLIENT_SECRET",
+                "client_secret": "do-not-store-this",
+            },
+        )
+        self.assertEqual(settings["secret_env_var"], "ACME_INTUNE_CLIENT_SECRET")
+        connector = get_connector(conn, "intune")
+        self.assertIn("ACME_INTUNE_TENANT_ID", connector.settings_json)
+        self.assertIn("DeviceManagementManagedDevices.Read.All", connector.settings_json)
+        self.assertNotIn("do-not-store-this", connector.settings_json)
+
+        seed_connector_catalog(conn)
+
+        connector = get_connector(conn, "intune")
+        self.assertIn("ACME_INTUNE_TENANT_ID", connector.settings_json)
+
+    def test_intune_test_uses_configured_env_var_names_without_rendering_secret(self):
+        conn = self.make_conn()
+        save_intune_settings(
+            conn,
+            {
+                "display_name": "Corporate Intune",
+                "cloud": "global",
+                "tenant_id": "22222222-2222-2222-2222-222222222222",
+                "client_id": "33333333-3333-3333-3333-333333333333",
+                "tenant_env_var": "ACME_INTUNE_TENANT_ID",
+                "client_env_var": "ACME_INTUNE_CLIENT_ID",
+                "secret_env_var": "ACME_INTUNE_CLIENT_SECRET",
+            },
+        )
+        with patch.dict(os.environ, {"ACME_INTUNE_TENANT_ID": "tenant"}, clear=True):
+            result = test_connector(conn, "intune")
+        self.assertFalse(result.success)
+        self.assertIn("ACME_INTUNE_CLIENT_ID", result.message)
+        self.assertIn("ACME_INTUNE_CLIENT_SECRET", result.message)
+        self.assertNotIn("tenant", result.message)
 
     def test_sample_connector_sync_persists_health_and_mapping(self):
         conn = self.make_conn()

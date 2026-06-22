@@ -1,0 +1,10 @@
+.DS_Store
+__pycache__/
+*.py[cod]
+*.sqlite3
+security-vulnerability-daily-*.html
+runs/
+trace_state*.json
+reports/
+.venv/
+venv/

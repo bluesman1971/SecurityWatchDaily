@@ -1,0 +1,226 @@
+{
+  "schema_version": 1,
+  "description": "Dynamic watch list for the daily vulnerability report. Add/remove platforms here instead of editing vuln_watch.py.",
+  "global_keywords": [
+    "microsoft",
+    "windows",
+    "office",
+    "m365",
+    "365",
+    "copilot",
+    "defender",
+    "ubuntu",
+    "canonical",
+    "cisco",
+    "meraki",
+    "palo alto",
+    "pan-os",
+    "globalprotect"
+  ],
+  "platforms": [
+    {
+      "id": "windows_11",
+      "display_name": "Windows 11 / Microsoft endpoint stack",
+      "enabled": true,
+      "vendors": [
+        "Microsoft"
+      ],
+      "keywords": [
+        "windows",
+        "windows 11",
+        "defender",
+        "bitlocker",
+        "http.sys",
+        "ctfmon",
+        "edge",
+        "chromium"
+      ],
+      "msrc_title_keywords": [
+        "windows",
+        "defender",
+        "bitlocker",
+        "http.sys",
+        "ctfmon",
+        "edge"
+      ],
+      "cisa_keywords": [
+        "microsoft",
+        "windows",
+        "defender",
+        "edge",
+        "chromium"
+      ],
+      "minimum_cve_year": 2025,
+      "default_priority": "Medium"
+    },
+    {
+      "id": "m365",
+      "display_name": "Microsoft 365 / Copilot",
+      "enabled": true,
+      "vendors": [
+        "Microsoft"
+      ],
+      "keywords": [
+        "m365",
+        "microsoft 365",
+        "office 365",
+        "copilot",
+        "business chat",
+        "exchange online",
+        "teams"
+      ],
+      "msrc_title_keywords": [
+        "m365",
+        "microsoft 365",
+        "365 copilot",
+        "copilot",
+        "business chat",
+        "exchange online",
+        "teams"
+      ],
+      "cisa_keywords": [
+        "microsoft 365",
+        "m365",
+        "copilot",
+        "exchange online",
+        "teams"
+      ],
+      "minimum_cve_year": 2025,
+      "default_priority": "Medium"
+    },
+    {
+      "id": "office",
+      "display_name": "Microsoft Office / M365 Apps",
+      "enabled": true,
+      "vendors": [
+        "Microsoft"
+      ],
+      "keywords": [
+        "office",
+        "word",
+        "excel",
+        "outlook",
+        "powerpoint",
+        "visio",
+        "click-to-run"
+      ],
+      "msrc_title_keywords": [
+        "office",
+        "word",
+        "excel",
+        "outlook",
+        "powerpoint",
+        "visio",
+        "click-to-run"
+      ],
+      "cisa_keywords": [
+        "microsoft office",
+        "office",
+        "word",
+        "excel",
+        "outlook"
+      ],
+      "minimum_cve_year": 2025,
+      "default_priority": "Medium"
+    },
+    {
+      "id": "ubuntu_lts",
+      "display_name": "Ubuntu 22.04\u201326.04 package ecosystem",
+      "enabled": true,
+      "vendors": [
+        "Canonical",
+        "Ubuntu"
+      ],
+      "keywords": [
+        "ubuntu",
+        "canonical",
+        "linux"
+      ],
+      "ubuntu_releases": [
+        "Ubuntu 22.04",
+        "Ubuntu 24.04",
+        "Ubuntu 26.04"
+      ],
+      "cisa_keywords": [
+        "ubuntu",
+        "canonical"
+      ],
+      "minimum_cve_year": 2025,
+      "default_priority": "Medium"
+    },
+    {
+      "id": "cisco_meraki",
+      "display_name": "Cisco Meraki switches / Catalyst managed via Meraki",
+      "enabled": true,
+      "vendors": [
+        "Cisco",
+        "Meraki"
+      ],
+      "keywords": [
+        "cisco",
+        "meraki",
+        "ms390",
+        "catalyst",
+        "switch",
+        "ios xe",
+        "dashboard management"
+      ],
+      "cisa_keywords": [
+        "meraki",
+        "ms390",
+        "catalyst",
+        "switch",
+        "ios xe"
+      ],
+      "exclude_keywords": [
+        "sd-wan",
+        "sd-wan manager",
+        "sdwan"
+      ],
+      "minimum_cve_year": 2025,
+      "default_priority": "Medium"
+    },
+    {
+      "id": "palo_alto_pan_os",
+      "display_name": "Palo Alto firewalls / PAN-OS",
+      "enabled": true,
+      "vendors": [
+        "Palo Alto Networks"
+      ],
+      "keywords": [
+        "palo alto",
+        "pan-os",
+        "globalprotect",
+        "prisma access",
+        "cloud ngfw"
+      ],
+      "paloalto_products": [
+        "PAN-OS",
+        "Prisma Access",
+        "Cloud NGFW"
+      ],
+      "cisa_keywords": [
+        "palo alto",
+        "pan-os",
+        "globalprotect"
+      ],
+      "minimum_cve_year": 2025,
+      "default_priority": "Medium"
+    }
+  ],
+  "source_links": {
+    "MSRC": "https://msrc.microsoft.com/update-guide/",
+    "CISA": "https://www.cisa.gov/known-exploited-vulnerabilities-catalog",
+    "Ubuntu": "https://ubuntu.com/security/notices",
+    "Palo Alto": "https://security.paloaltonetworks.com/",
+    "Hacker News": "https://hn.algolia.com/?query=CVE&sort=byDate&type=story",
+    "FIRST EPSS": "https://www.first.org/epss/",
+    "GreyNoise": "https://www.greynoise.io/blog",
+    "Shadowserver": "https://www.shadowserver.org/news/",
+    "Rapid7 AttackerKB": "https://attackerkb.com/",
+    "SANS ISC": "https://isc.sans.edu/",
+    "Tenable": "https://www.tenable.com/plugins",
+    "Qualys": "https://www.qualys.com/vulnerability-detection-pipeline",
+    "Rapid7": "https://www.rapid7.com/blog/"
+  }
+}

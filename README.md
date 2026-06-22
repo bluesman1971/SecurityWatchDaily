@@ -12,17 +12,19 @@ It imports an optional `watchlist.json`, stores editable platforms and sources i
 - SQLite-backed configuration and run history.
 - SQLite-backed assets, asset components, product aliases, finding products, version ranges, materialized asset matches, connector status, sync runs, import errors, and connector asset mappings.
 - Source-level error handling so one broken feed does not stop the daily run.
-- No stored credentials, user accounts, or cloud deployment in the first version.
+- Local admin authentication for the web UI. Passwords are stored only as salted password hashes.
+- No cloud deployment in the first version.
 
 ## Run Locally
 
 ```bash
 python3 -m securitywatchdaily init
+python3 -m securitywatchdaily create-admin
 python3 -m securitywatchdaily run --sample --force-visible
 python3 -m securitywatchdaily serve
 ```
 
-Open `http://127.0.0.1:8765`.
+Open `http://127.0.0.1:8765` and log in with the admin user you created.
 
 If that port is busy, choose another:
 
@@ -36,6 +38,7 @@ python3 -m securitywatchdaily serve --port 8876
 python3 -m securitywatchdaily validate
 python3 -m securitywatchdaily summary
 python3 -m securitywatchdaily run
+python3 -m securitywatchdaily create-admin --username admin
 ```
 
 Use `run --sample` to validate the local workflow without relying on network access.
@@ -92,6 +95,26 @@ Freshservice `403` means the API key authenticated but is not authorized for the
 python3 -m compileall -q securitywatchdaily tests
 python3 -m unittest discover -s tests -v
 ```
+
+## Security Checks
+
+Install the pinned Python dev tools:
+
+```bash
+python3 -m venv .venv
+.venv/bin/python -m pip install -e ".[dev]"
+```
+
+Run the local checks:
+
+```bash
+.venv/bin/ruff check securitywatchdaily tests
+.venv/bin/semgrep scan --metrics off --config p/python --error securitywatchdaily tests
+.venv/bin/pip-audit --local
+gitleaks detect --source . --no-banner --redact
+```
+
+`gitleaks` is installed outside Python, for example with Homebrew on macOS. CI runs Ruff, Semgrep, pip-audit, Gitleaks, compile, and unittest.
 
 ## Repository Standards
 

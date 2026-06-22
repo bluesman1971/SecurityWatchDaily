@@ -9,7 +9,7 @@ from pathlib import Path
 from .errors import StorageError
 
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 
 def connect(db_path: Path) -> sqlite3.Connection:
@@ -31,6 +31,16 @@ def initialize(conn: sqlite3.Connection) -> None:
               key TEXT PRIMARY KEY,
               value TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS users (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              username TEXT NOT NULL UNIQUE,
+              password_hash TEXT NOT NULL,
+              role TEXT NOT NULL,
+              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              last_login_at TEXT NOT NULL DEFAULT ''
+            );
+            CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
             CREATE TABLE IF NOT EXISTS platforms (
               id TEXT PRIMARY KEY,
               display_name TEXT NOT NULL,

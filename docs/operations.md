@@ -4,9 +4,15 @@
 
 ```bash
 python3 -m securitywatchdaily init
+python3 -m securitywatchdaily create-admin
 python3 -m securitywatchdaily validate
 python3 -m securitywatchdaily serve
 ```
+
+`create-admin` prompts for a local admin password and stores only a salted password hash in SQLite. For scripted local setup, pass
+`--password-stdin` and provide the password through stdin instead of putting it on the command line.
+
+After the server starts, open `http://127.0.0.1:8765` and log in with the admin user.
 
 ## Daily Run
 
@@ -61,6 +67,7 @@ Intune connector notes:
 - If a platform produces noisy matches, add exclude keywords and use more specific phrases.
 - If the database cannot be opened, check write permissions in the project folder.
 - If the UI is unreachable, confirm the local server printed `http://127.0.0.1:8765`.
+- If login fails on a new database, confirm `python3 -m securitywatchdaily create-admin` has been run for that database path.
 
 ## Safety Notes
 
@@ -68,6 +75,7 @@ Intune connector notes:
 - Keep source URLs public unless secret handling has been designed.
 - Do not commit generated databases, connector logs, imported asset data, customer exports, or trace/run output.
 - Keep the server bound to `127.0.0.1` for local use.
+- The web UI requires a local admin login. Passwords are never stored in plaintext.
 - Non-loopback hosts such as `0.0.0.0`, `::`, or LAN addresses are rejected in local mode. The `--shared`
-  flag exists as an explicit future shared-mode request, but startup fails closed until authentication and secure
-  deployment settings are implemented.
+  flag exists as an explicit future shared-mode request, but startup still fails closed until CSRF protection,
+  hardened persistent sessions, and secure deployment settings are implemented.

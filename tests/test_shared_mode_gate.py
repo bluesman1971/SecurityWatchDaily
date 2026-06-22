@@ -28,12 +28,12 @@ class SharedModeGateTests(unittest.TestCase):
                         serve(host, 0, db_path)
                     self.assertIn("non-loopback", ctx.exception.message)
 
-    def test_shared_mode_fails_closed_until_authentication_exists(self):
+    def test_shared_mode_fails_closed_until_remaining_prerequisites_exist(self):
         with tempfile.TemporaryDirectory() as tmp:
             with self.assertRaises(AppError) as ctx:
                 serve("0.0.0.0", 0, Path(tmp) / "app.sqlite3", shared=True)
         self.assertIn("Shared mode is not available yet", ctx.exception.message)
-        self.assertIn("authentication", ctx.exception.detail)
+        self.assertIn("CSRF protection", ctx.exception.detail)
 
     def test_cli_accepts_explicit_shared_flag(self):
         parser = build_parser()

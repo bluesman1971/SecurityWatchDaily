@@ -121,10 +121,33 @@ nav a {
   transition: color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
 }
 
-nav a:hover {
+nav a:hover,
+.link-button:hover {
   color: var(--ink);
   background: var(--paper-2);
   text-decoration: none;
+}
+
+.nav-form {
+  display: inline-flex;
+  margin: 0;
+}
+
+.link-button {
+  min-height: auto;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--ink-soft);
+  font: inherit;
+  font-weight: 600;
+  font-size: 14.5px;
+  box-shadow: none;
+}
+
+.link-button::after {
+  content: "";
 }
 
 .shell {
@@ -149,6 +172,11 @@ nav a:hover {
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 28px;
   align-items: end;
+}
+
+.auth-panel {
+  max-width: 440px;
+  margin: 40px auto;
 }
 
 h1,
@@ -217,6 +245,11 @@ button:hover,
   filter: brightness(1.1);
   text-decoration: none;
   transform: translateY(-1px);
+}
+
+.link-button:hover {
+  filter: none;
+  transform: none;
 }
 
 button[disabled] {
@@ -485,6 +518,11 @@ textarea {
   nav { margin-top: 12px; }
 
   nav a {
+    min-height: 36px;
+    padding: 0 12px 0 0;
+  }
+
+  .link-button {
     min-height: 36px;
     padding: 0 12px 0 0;
   }

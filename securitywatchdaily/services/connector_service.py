@@ -581,21 +581,21 @@ def save_intune_settings(conn: sqlite3.Connection, form: dict[str, str]) -> dict
 
 
 def validate_intune_settings(settings: dict[str, object]) -> None:
-    for field in ("display_name", "tenant_id", "client_id", "tenant_env_var", "client_env_var", "secret_env_var"):
-        value = str(settings.get(field, "") or "")
+    for field_name in ("display_name", "tenant_id", "client_id", "tenant_env_var", "client_env_var", "secret_env_var"):
+        value = str(settings.get(field_name, "") or "")
         if len(value) > MAX_FIELD_LENGTH:
-            raise ConfigValidationError("Intune setup is invalid.", detail=f"{field} must be 255 characters or fewer.")
+            raise ConfigValidationError("Intune setup is invalid.", detail=f"{field_name} must be 255 characters or fewer.")
     if settings.get("cloud") not in INTUNE_CLOUDS:
         raise ConfigValidationError("Intune cloud is invalid.", detail="Choose one of the supported Microsoft Graph clouds.")
     if settings.get("tenant_id") and not GUID_PATTERN.match(str(settings["tenant_id"])):
         raise ConfigValidationError("Tenant ID is invalid.", detail="Use the Microsoft Entra tenant GUID.")
     if settings.get("client_id") and not GUID_PATTERN.match(str(settings["client_id"])):
         raise ConfigValidationError("Client ID is invalid.", detail="Use the app registration client GUID.")
-    for field in ("tenant_env_var", "client_env_var", "secret_env_var"):
-        if not ENV_VAR_PATTERN.match(str(settings.get(field, ""))):
+    for field_name in ("tenant_env_var", "client_env_var", "secret_env_var"):
+        if not ENV_VAR_PATTERN.match(str(settings.get(field_name, ""))):
             raise ConfigValidationError(
                 "Environment variable name is invalid.",
-                detail=f"{field} must use uppercase letters, numbers, and underscores.",
+                detail=f"{field_name} must use uppercase letters, numbers, and underscores.",
             )
 
 

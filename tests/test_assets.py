@@ -13,7 +13,7 @@ from securitywatchdaily.repositories.assets import (
     list_matches_for_asset,
     save_product_alias,
 )
-from securitywatchdaily.repositories.runs import latest_run, list_findings
+from securitywatchdaily.repositories.runs import list_findings
 from securitywatchdaily.services.asset_import_service import import_inventory_csv, parse_inventory_csv
 from securitywatchdaily.services.asset_matching_service import (
     classify_version_match,

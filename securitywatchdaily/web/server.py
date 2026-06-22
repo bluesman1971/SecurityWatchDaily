@@ -5,12 +5,16 @@ from __future__ import annotations
 import json
 import ipaddress
 import re
+import secrets
+import threading
+from http.cookies import SimpleCookie
 from contextlib import contextmanager
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
+from securitywatchdaily.auth import admin_user_count, authenticate_user, get_user_by_id
 from securitywatchdaily.config import database_path, legacy_watchlist_path
 from securitywatchdaily.database import connect, initialize
 from securitywatchdaily.errors import AppError
@@ -57,6 +61,8 @@ MAX_POST_BYTES = 2 * 1024 * 1024
 class AppContext:
     def __init__(self, db_path: Path) -> None:
         self.db_path = db_path
+        self._sessions: dict[str, int] = {}
+        self._sessions_lock = threading.Lock()
 
     @contextmanager
     def connection(self):
@@ -68,9 +74,24 @@ class AppContext:
         finally:
             conn.close()
 
+    def create_session(self, user_id: int) -> str:
+        token = secrets.token_urlsafe(32)
+        with self._sessions_lock:
+            self._sessions[token] = user_id
+        return token
+
+    def get_session_user_id(self, token: str) -> int | None:
+        with self._sessions_lock:
+            return self._sessions.get(token)
+
+    def destroy_session(self, token: str) -> None:
+        with self._sessions_lock:
+            self._sessions.pop(token, None)
+
 
 class SecurityWatchHandler(BaseHTTPRequestHandler):
     context: AppContext
+    session_cookie_name = "swd_session"
 
     def log_message(self, format: str, *args: object) -> None:
         return
@@ -80,6 +101,15 @@ class SecurityWatchHandler(BaseHTTPRequestHandler):
         try:
             if parsed.path.startswith("/static/"):
                 self.serve_static(parsed.path)
+                return
+            if parsed.path == "/api/health":
+                self.health()
+                return
+            if parsed.path == "/login":
+                self.login_form()
+                return
+            if not self.current_user():
+                self.redirect(f"/login?next={self._safe_next_path(parsed.path)}")
                 return
             routes = {
                 "/": self.dashboard,
@@ -92,7 +122,6 @@ class SecurityWatchHandler(BaseHTTPRequestHandler):
                 "/assets": self.assets,
                 "/assets/import": self.asset_import_form,
                 "/connectors": self.connectors,
-                "/api/health": self.health,
             }
             handler = routes.get(parsed.path)
             if parsed.path == "/connectors/intune/setup":
@@ -119,6 +148,23 @@ class SecurityWatchHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         parsed = urlparse(self.path)
         try:
+            if parsed.path == "/login":
+                self.login_action()
+                return
+            if not self.current_user():
+                self.discard_request_body()
+                self.respond(
+                    page(
+                        "Authentication required",
+                        "<section class='panel'><h1>Authentication required</h1></section>",
+                        auth_nav=False,
+                    ),
+                    HTTPStatus.UNAUTHORIZED,
+                )
+                return
+            if parsed.path == "/logout":
+                self.logout_action()
+                return
             form = self.read_form()
             if parsed.path == "/platforms":
                 self.create_platform(form)
@@ -159,6 +205,39 @@ class SecurityWatchHandler(BaseHTTPRequestHandler):
         parsed = parse_qs(raw, keep_blank_values=True)
         return {key: values[0] for key, values in parsed.items()}
 
+    def discard_request_body(self) -> None:
+        length = int(self.headers.get("Content-Length", "0") or "0")
+        if length > 0:
+            self.rfile.read(min(length, MAX_POST_BYTES + 1))
+
+    def current_user(self) -> object | None:
+        token = self._session_cookie()
+        if not token:
+            return None
+        user_id = self.context.get_session_user_id(token)
+        if user_id is None:
+            return None
+        with self.context.connection() as conn:
+            user = get_user_by_id(conn, user_id)
+        if not user or user["role"] != "admin":
+            self.context.destroy_session(token)
+            return None
+        return user
+
+    def _session_cookie(self) -> str:
+        cookie_header = self.headers.get("Cookie", "")
+        if not cookie_header:
+            return ""
+        cookie = SimpleCookie()
+        cookie.load(cookie_header)
+        morsel = cookie.get(self.session_cookie_name)
+        return morsel.value if morsel else ""
+
+    def _safe_next_path(self, path: str) -> str:
+        if path.startswith("/") and not path.startswith("//"):
+            return path
+        return "/"
+
     def parse_multipart(self, raw: bytes, content_type: str) -> dict[str, str]:
         boundary_match = re.search(r"boundary=(?P<boundary>[^;]+)", content_type)
         if not boundary_match:
@@ -180,17 +259,27 @@ class SecurityWatchHandler(BaseHTTPRequestHandler):
             result[name] = value.rstrip(b"\r\n").decode("utf-8-sig", errors="replace")
         return result
 
-    def respond(self, body: bytes, status: HTTPStatus = HTTPStatus.OK, content_type: str = "text/html; charset=utf-8") -> None:
+    def respond(
+        self,
+        body: bytes,
+        status: HTTPStatus = HTTPStatus.OK,
+        content_type: str = "text/html; charset=utf-8",
+        headers: dict[str, str] | None = None,
+    ) -> None:
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Referrer-Policy", "no-referrer")
+        for name, value in (headers or {}).items():
+            self.send_header(name, value)
         self.end_headers()
         self.wfile.write(body)
 
-    def redirect(self, path: str) -> None:
+    def redirect(self, path: str, *, headers: dict[str, str] | None = None) -> None:
         self.send_response(HTTPStatus.SEE_OTHER)
         self.send_header("Location", path)
+        for name, value in (headers or {}).items():
+            self.send_header(name, value)
         self.end_headers()
 
     def serve_static(self, path: str) -> None:
@@ -203,6 +292,55 @@ class SecurityWatchHandler(BaseHTTPRequestHandler):
             self.respond(b"Not found", HTTPStatus.NOT_FOUND, "text/plain")
             return
         self.respond(file_path.read_bytes(), content_type="text/css; charset=utf-8")
+
+    def login_form(self, *, error: str = "") -> None:
+        parsed = urlparse(self.path)
+        next_path = self._safe_next_path(parse_qs(parsed.query).get("next", ["/"])[0])
+        with self.context.connection() as conn:
+            has_admin = admin_user_count(conn) > 0
+        setup_note = (
+            ""
+            if has_admin
+            else "<div class='notice'>No admin user exists yet. Run <code>python3 -m securitywatchdaily create-admin</code> first.</div>"
+        )
+        body = f"""
+        <section class="panel auth-panel">
+          <h1>Login</h1>
+          {setup_note}
+          <form class="stack" method="post" action="/login">
+            <input type="hidden" name="next" value="{esc(next_path)}">
+            <label>Username<input name="username" autocomplete="username" autofocus></label>
+            <label>Password<input type="password" name="password" autocomplete="current-password"></label>
+            <button>Login</button>
+          </form>
+        </section>
+        """
+        self.respond(page("Login", body, error=error, auth_nav=False), HTTPStatus.UNAUTHORIZED if error else HTTPStatus.OK)
+
+    def login_action(self) -> None:
+        form = self.read_form()
+        username = form.get("username", "")
+        password = form.get("password", "")
+        next_path = self._safe_next_path(form.get("next", "/"))
+        with self.context.connection() as conn:
+            user = authenticate_user(conn, username, password)
+        if not user:
+            self.login_form(error="Invalid username or password.")
+            return
+        token = self.context.create_session(int(user["id"]))
+        self.redirect(next_path, headers={"Set-Cookie": self._session_cookie_header(token)})
+
+    def logout_action(self) -> None:
+        token = self._session_cookie()
+        if token:
+            self.context.destroy_session(token)
+        self.redirect("/login", headers={"Set-Cookie": self._clear_session_cookie_header()})
+
+    def _session_cookie_header(self, token: str) -> str:
+        return f"{self.session_cookie_name}={token}; Path=/; HttpOnly; SameSite=Lax"
+
+    def _clear_session_cookie_header(self) -> str:
+        return f"{self.session_cookie_name}=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax"
 
     def dashboard(self) -> None:
         with self.context.connection() as conn:
@@ -679,8 +817,8 @@ def _validate_bind_mode(host: str, *, shared: bool) -> None:
         raise AppError(
             "Shared mode is not available yet.",
             detail=(
-                "Refusing to start with --shared until real authentication and HTTPS or reverse-proxy "
-                "deployment settings are implemented."
+                "Refusing to start with --shared until CSRF protection, hardened persistent sessions, "
+                "and HTTPS or reverse-proxy deployment settings are implemented."
             ),
         )
     if not _is_loopback_bind_host(host):
@@ -688,7 +826,7 @@ def _validate_bind_mode(host: str, *, shared: bool) -> None:
             "Refusing to bind the local web UI to a non-loopback address.",
             detail=(
                 "Use the default 127.0.0.1 host for local mode. "
-                "Shared mode is blocked until authentication is implemented."
+                "Shared mode is blocked until the remaining security roadmap prerequisites are implemented."
             ),
         )
 

@@ -12,7 +12,7 @@ It imports an optional `watchlist.json`, stores editable platforms and sources i
 - SQLite-backed configuration and run history.
 - SQLite-backed assets, asset components, product aliases, finding products, version ranges, materialized asset matches, connector status, sync runs, import errors, and connector asset mappings.
 - Source-level error handling so one broken feed does not stop the daily run.
-- Local admin authentication for the web UI. Passwords are stored only as salted password hashes.
+- Local admin authentication for the web UI with SQLite-backed server-side sessions, CSRF-protected POST forms, and same-origin POST checks. Passwords are stored only as salted password hashes, and raw session tokens are not stored in SQLite.
 - No cloud deployment in the first version.
 
 ## Run Locally
@@ -25,6 +25,8 @@ python3 -m securitywatchdaily serve
 ```
 
 Open `http://127.0.0.1:8765` and log in with the admin user you created.
+
+Authenticated browser forms include per-session CSRF tokens. If a state-changing action returns `403`, refresh the current page after logging in again and retry from the local UI.
 
 If that port is busy, choose another:
 
@@ -122,8 +124,8 @@ gitleaks detect --source . --no-banner --redact
 - User-editable platform and source inputs are validated before saving.
 - External source content, connector data, and imported CSV content are treated as untrusted and escaped before rendering.
 - Generated databases, imported customer data, reports, connector logs, run logs, caches, and trace files are ignored.
-- Tests cover matching, validation, normalization, CSV import, connector status and sync flows, version handling, trace suppression, storage, friendly source errors, and practical web flows.
+- Tests cover matching, validation, normalization, CSV import, connector status and sync flows, version handling, trace suppression, storage, authentication, sessions, CSRF and Origin checks, friendly source errors, and practical web flows.
 
 ## Before Network Hosting
 
-Do not expose this app directly to a network without a Strict-profile review for authentication, authorization, CSRF protection, deployment settings, logging, and source-secret handling.
+Do not expose this app directly to a network without a Strict-profile review for remaining shared-mode prerequisites, including SSRF protections, response limits, safe error handling, browser security headers, upload hardening, audit logging, deployment settings, and source-secret handling.

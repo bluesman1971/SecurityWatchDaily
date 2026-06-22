@@ -9,7 +9,7 @@ from pathlib import Path
 from .errors import StorageError
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 def connect(db_path: Path) -> sqlite3.Connection:
@@ -86,6 +86,82 @@ def initialize(conn: sqlite3.Connection) -> None:
             );
             CREATE INDEX IF NOT EXISTS idx_findings_run_id ON findings(run_id);
             CREATE INDEX IF NOT EXISTS idx_findings_key ON findings(key);
+            CREATE TABLE IF NOT EXISTS assets (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              hostname TEXT NOT NULL UNIQUE,
+              owner TEXT NOT NULL DEFAULT '',
+              location TEXT NOT NULL DEFAULT '',
+              asset_type TEXT NOT NULL DEFAULT '',
+              platform TEXT NOT NULL DEFAULT '',
+              last_seen TEXT NOT NULL DEFAULT '',
+              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE TABLE IF NOT EXISTS asset_components (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              asset_id INTEGER NOT NULL REFERENCES assets(id) ON DELETE CASCADE,
+              component_type TEXT NOT NULL DEFAULT 'software',
+              vendor TEXT NOT NULL DEFAULT '',
+              product TEXT NOT NULL,
+              version TEXT NOT NULL DEFAULT '',
+              platform TEXT NOT NULL DEFAULT '',
+              normalized_vendor TEXT NOT NULL DEFAULT '',
+              normalized_product TEXT NOT NULL DEFAULT '',
+              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE INDEX IF NOT EXISTS idx_asset_components_asset_id ON asset_components(asset_id);
+            CREATE INDEX IF NOT EXISTS idx_asset_components_normalized ON asset_components(normalized_vendor, normalized_product, platform);
+            CREATE TABLE IF NOT EXISTS product_aliases (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              raw_vendor TEXT NOT NULL DEFAULT '',
+              raw_product TEXT NOT NULL,
+              normalized_vendor TEXT NOT NULL DEFAULT '',
+              normalized_product TEXT NOT NULL,
+              platform TEXT NOT NULL DEFAULT '',
+              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              UNIQUE(raw_vendor, raw_product)
+            );
+            CREATE INDEX IF NOT EXISTS idx_product_aliases_raw ON product_aliases(raw_vendor, raw_product);
+            CREATE TABLE IF NOT EXISTS finding_products (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              finding_id INTEGER NOT NULL REFERENCES findings(id) ON DELETE CASCADE,
+              vendor TEXT NOT NULL DEFAULT '',
+              product TEXT NOT NULL,
+              platform TEXT NOT NULL DEFAULT '',
+              source TEXT NOT NULL DEFAULT 'inferred',
+              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              UNIQUE(finding_id, vendor, product, platform)
+            );
+            CREATE INDEX IF NOT EXISTS idx_finding_products_finding_id ON finding_products(finding_id);
+            CREATE INDEX IF NOT EXISTS idx_finding_products_normalized ON finding_products(vendor, product, platform);
+            CREATE TABLE IF NOT EXISTS finding_version_ranges (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              finding_product_id INTEGER NOT NULL REFERENCES finding_products(id) ON DELETE CASCADE,
+              affected_min_version TEXT NOT NULL DEFAULT '',
+              affected_max_version TEXT NOT NULL DEFAULT '',
+              fixed_version TEXT NOT NULL DEFAULT '',
+              exact_version TEXT NOT NULL DEFAULT '',
+              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE INDEX IF NOT EXISTS idx_finding_version_ranges_product_id ON finding_version_ranges(finding_product_id);
+            CREATE TABLE IF NOT EXISTS finding_asset_matches (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              finding_id INTEGER NOT NULL REFERENCES findings(id) ON DELETE CASCADE,
+              asset_id INTEGER NOT NULL REFERENCES assets(id) ON DELETE CASCADE,
+              asset_component_id INTEGER REFERENCES asset_components(id) ON DELETE SET NULL,
+              confidence TEXT NOT NULL,
+              reason TEXT NOT NULL,
+              review_state TEXT NOT NULL DEFAULT '',
+              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              UNIQUE(finding_id, asset_id, asset_component_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_finding_asset_matches_finding_id ON finding_asset_matches(finding_id);
+            CREATE INDEX IF NOT EXISTS idx_finding_asset_matches_asset_id ON finding_asset_matches(asset_id);
             CREATE TABLE IF NOT EXISTS trace_items (
               key TEXT PRIMARY KEY,
               first_seen TEXT NOT NULL,

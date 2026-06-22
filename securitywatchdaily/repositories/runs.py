@@ -109,9 +109,35 @@ def list_findings(conn: sqlite3.Connection, *, run_id: str | None = None, visibl
             trace_status=row["trace_status"],
             epss_score=row["epss_score"],
             epss_percentile=row["epss_percentile"],
+            id=int(row["id"]),
+            run_id=row["run_id"],
         )
         for row in conn.execute(sql, params)
     ]
+
+
+def get_finding(conn: sqlite3.Connection, finding_id: int) -> Finding | None:
+    row = conn.execute("SELECT * FROM findings WHERE id = ?", (finding_id,)).fetchone()
+    if not row:
+        return None
+    return Finding(
+        key=row["key"],
+        platform=row["platform"],
+        title=row["title"],
+        status=row["status"],
+        description=row["description"],
+        action=row["action"],
+        sources=loads_list(row["sources"]),
+        published=row["published"],
+        cves=loads_list(row["cves"]),
+        priority=row["priority"],
+        status_hash=row["status_hash"],
+        trace_status=row["trace_status"],
+        epss_score=row["epss_score"],
+        epss_percentile=row["epss_percentile"],
+        id=int(row["id"]),
+        run_id=row["run_id"],
+    )
 
 
 def get_trace_item(conn: sqlite3.Connection, key: str) -> sqlite3.Row | None:

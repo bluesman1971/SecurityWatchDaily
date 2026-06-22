@@ -1,10 +1,13 @@
 import http.client
+import contextlib
+import io
 import re
 import tempfile
 import threading
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from securitywatchdaily.auth import create_admin_user
 from securitywatchdaily.database import connect, initialize
@@ -86,6 +89,72 @@ class WebTests(unittest.TestCase):
         status, data, _ = self.request("GET", "/")
         self.assertEqual(status, 200)
         self.assertIn("Daily vulnerability watch", data)
+
+    def test_malformed_asset_and_finding_ids_fail_safely(self):
+        for path, label in [("/assets/not-an-int", "requested asset was not found"), ("/findings/not-an-int", "requested finding was not found")]:
+            with self.subTest(path=path):
+                status, data, _ = self.request("GET", path)
+                self.assertIn(status, {400, 404})
+                self.assertIn(label, data)
+                self.assertNotIn("ValueError", data)
+                self.assertNotIn("invalid literal", data)
+
+    def test_invalid_minimum_cve_year_returns_validation_error(self):
+        body = (
+            "id=phase7_platform&display_name=Phase+7+Platform&keywords=phase7&"
+            "minimum_cve_year=twenty&default_priority=Medium"
+        )
+        status, data, _ = self.request("POST", "/platforms", body=body)
+        self.assertEqual(status, 400)
+        self.assertIn("Minimum CVE year must be a whole number.", data)
+        self.assertNotIn("ValueError", data)
+        self.assertNotIn("invalid literal", data)
+
+    def test_unexpected_get_errors_render_safe_generic_page(self):
+        def boom(handler):
+            raise RuntimeError(
+                "RuntimeError /Users/thomasbaker/security-vuln-watch "
+                "FRESHSERVICE_API_KEY=live-secret Bearer abc123 csrf_token=token123 "
+                "https://user:password@example.com/feed"
+            )
+
+        with mock.patch.object(self.server.RequestHandlerClass, "dashboard", boom):
+            with contextlib.redirect_stderr(io.StringIO()):
+                status, data, _ = self.request("GET", "/")
+        self.assertEqual(status, 500)
+        self.assertIn("Unexpected local error", data)
+        for unsafe in [
+            "RuntimeError",
+            "Traceback",
+            "/Users/thomasbaker/security-vuln-watch",
+            "live-secret",
+            "Bearer abc123",
+            "csrf_token=token123",
+            "https://user:password@example.com/feed",
+        ]:
+            self.assertNotIn(unsafe, data)
+
+    def test_unexpected_post_errors_render_safe_generic_page(self):
+        def boom(handler, *, offline_sample):
+            raise RuntimeError(
+                "RuntimeError /Users/thomasbaker/security-vuln-watch "
+                "client_secret=live-secret swd_session=session123 https://user:password@example.com/feed"
+            )
+
+        with mock.patch.object(self.server.RequestHandlerClass, "run_now", boom):
+            with contextlib.redirect_stderr(io.StringIO()):
+                status, data, _ = self.request("POST", "/run-sample", body="")
+        self.assertEqual(status, 500)
+        self.assertIn("Unexpected local error", data)
+        for unsafe in [
+            "RuntimeError",
+            "Traceback",
+            "/Users/thomasbaker/security-vuln-watch",
+            "live-secret",
+            "swd_session=session123",
+            "https://user:password@example.com/feed",
+        ]:
+            self.assertNotIn(unsafe, data)
 
     def test_sample_run_from_web(self):
         status, _, _ = self.request("POST", "/run-sample", body="")

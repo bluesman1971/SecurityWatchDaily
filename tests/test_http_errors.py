@@ -1,9 +1,10 @@
 import socket
 import unittest
+import urllib.error
 from urllib.request import Request
 from unittest.mock import patch
 
-from securitywatchdaily.collectors.http import _NoRedirect, fetch_json, fetch_text
+from securitywatchdaily.collectors.http import _NoRedirect, fetch_json, fetch_text, read_external_response
 from securitywatchdaily.errors import SourceFetchError, SourceParseError
 
 
@@ -13,7 +14,7 @@ def public_dns_result(port=443):
 
 class FakeResponse:
     def __init__(self, body=b"ok"):
-        self.body = body
+        self.body = bytearray(body)
 
     def __enter__(self):
         return self
@@ -21,8 +22,24 @@ class FakeResponse:
     def __exit__(self, exc_type, exc, tb):
         return False
 
-    def read(self):
-        return self.body
+    def read(self, size=-1):
+        if size is None or size < 0:
+            size = len(self.body)
+        chunk = self.body[:size]
+        del self.body[:size]
+        return bytes(chunk)
+
+
+class ChunkedResponse:
+    def __init__(self, chunks):
+        self.chunks = list(chunks)
+        self.read_calls = 0
+
+    def read(self, size=-1):
+        self.read_calls += 1
+        if not self.chunks:
+            return b""
+        return self.chunks.pop(0)
 
 
 class HttpErrorTests(unittest.TestCase):
@@ -117,6 +134,41 @@ class HttpErrorTests(unittest.TestCase):
             ),
         ):
             self.assertEqual(fetch_text("https://example.com/feed.txt"), "hello")
+
+    def test_response_at_cap_is_allowed(self):
+        self.assertEqual(read_external_response(FakeResponse(b"12345"), max_bytes=5), b"12345")
+
+    def test_oversized_response_is_rejected_safely(self):
+        with self.assertRaises(SourceFetchError) as ctx:
+            read_external_response(FakeResponse(b"123456"), max_bytes=5)
+        self.assertIn("too large", ctx.exception.message)
+        self.assertIn("limit", ctx.exception.detail)
+
+    def test_chunked_read_stops_when_cap_is_exceeded(self):
+        response = ChunkedResponse([b"123", b"456", b"789"])
+        with self.assertRaises(SourceFetchError):
+            read_external_response(response, max_bytes=5)
+        self.assertEqual(response.read_calls, 2)
+
+    def test_timeout_error_is_safe_and_actionable(self):
+        with (
+            patch("socket.getaddrinfo", return_value=public_dns_result()),
+            patch(
+                "securitywatchdaily.collectors.http._NO_PROXY_NO_REDIRECT_OPENER.open",
+                side_effect=urllib.error.URLError(TimeoutError("timed out with api_key=secret")),
+            ),
+        ):
+            with self.assertRaises(SourceFetchError) as ctx:
+                fetch_text("https://example.com/feed.txt?api_key=secret", timeout=20)
+        self.assertIn("request timed out after 20 seconds", ctx.exception.detail)
+        self.assertNotIn("api_key", ctx.exception.detail)
+        self.assertNotIn("secret", ctx.exception.detail)
+
+    def test_url_credentials_are_not_echoed_in_error_detail(self):
+        with self.assertRaises(SourceFetchError) as ctx:
+            fetch_text("https://user:secret@example.com/feed.json")
+        self.assertIn("credentials in source URLs are not supported", ctx.exception.detail)
+        self.assertNotIn("user:secret", ctx.exception.detail)
 
 
 if __name__ == "__main__":

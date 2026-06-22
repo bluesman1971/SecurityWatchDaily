@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from urllib.parse import urljoin, urlparse
 
-from securitywatchdaily.collectors.http import open_external_url
+from securitywatchdaily.collectors.http import open_external_url, read_external_response
 from securitywatchdaily.errors import AppError, ConfigValidationError
 from securitywatchdaily.models import (
     Asset,
@@ -497,7 +497,7 @@ def maybe_test_freshservice_endpoint() -> None:
     token = base64.b64encode(f"{api_key}:X".encode("utf-8")).decode("ascii")
     try:
         with open_external_url(url, timeout=20, headers={"Authorization": f"Basic {token}"}) as response:
-            response.read(1024)
+            read_external_response(response, max_bytes=1024)
     except AppError as exc:
         raise ConfigValidationError(
             "Freshservice endpoint could not be reached.",

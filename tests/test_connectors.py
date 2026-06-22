@@ -61,6 +61,9 @@ class ConnectorTests(unittest.TestCase):
         conn = self.make_conn()
 
         class FakeResponse:
+            def __init__(self):
+                self.body = bytearray(b"{}")
+
             def __enter__(self):
                 return self
 
@@ -68,7 +71,11 @@ class ConnectorTests(unittest.TestCase):
                 return False
 
             def read(self, size=-1):
-                return b"{}"
+                if size is None or size < 0:
+                    size = len(self.body)
+                chunk = self.body[:size]
+                del self.body[:size]
+                return bytes(chunk)
 
         env = {
             "FRESHSERVICE_TENANT_URL": "https://tenant.freshservice.com",
@@ -84,6 +91,34 @@ class ConnectorTests(unittest.TestCase):
         self.assertTrue(result.success)
         self.assertEqual(open_url.call_args.args[0], "https://tenant.freshservice.com/api/v2/assets")
         self.assertIn("Authorization", open_url.call_args.kwargs["headers"])
+        self.assertNotIn("secret-api-key", result.message)
+
+    def test_freshservice_endpoint_check_uses_bounded_response_read(self):
+        conn = self.make_conn()
+
+        class OversizedResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self, size=-1):
+                return b"x" * size
+
+        env = {
+            "FRESHSERVICE_TENANT_URL": "https://tenant.freshservice.com",
+            "FRESHSERVICE_API_KEY": "secret-api-key",
+            "FRESHSERVICE_TEST_PATH": "/api/v2/assets",
+        }
+        with (
+            patch.dict(os.environ, env, clear=True),
+            patch("securitywatchdaily.services.connector_service.open_external_url", return_value=OversizedResponse()),
+        ):
+            result = test_connector(conn, "freshservice")
+
+        self.assertFalse(result.success)
+        self.assertIn("Response exceeded", result.message)
         self.assertNotIn("secret-api-key", result.message)
 
     def test_intune_settings_save_non_secret_values_and_survive_catalog_seed(self):

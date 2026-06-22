@@ -29,11 +29,13 @@ External source content, connector inventory content, and imported CSV inventory
 
 Connector credentials are secrets. They are read from local environment variables or future local-only secret handling, not stored in SQLite connector settings, committed files, sync runs, import errors, or browser-rendered pages.
 
-External collector fetches and connector setup checks use the shared safe HTTP helper in `collectors/http.py`. That path allows HTTPS URLs, resolves hostnames before connecting, blocks loopback, private, link-local, multicast, IPv6 unique-local/link-local, unspecified, and cloud metadata addresses, disables proxy use for these fetches, and does not follow redirects. Freshservice setup checks may send a local Basic Authorization header to the validated tenant URL, but connector errors must not include encoded tokens or raw secret values.
+External collector fetches and connector setup checks use the shared safe HTTP helper in `collectors/http.py`. That path allows HTTPS URLs, resolves hostnames before connecting, blocks loopback, private, link-local, multicast, IPv6 unique-local/link-local, unspecified, and cloud metadata addresses, disables proxy use for these fetches, and does not follow redirects. External feed bodies are read in chunks with a 5 MB cap and a 20-second default request timeout. Freshservice setup checks may send a local Basic Authorization header to the validated tenant URL, but connector errors must not include encoded tokens or raw secret values.
 
 The local web UI requires an admin login. Admin passwords are stored only as salted PBKDF2-SHA256 password hashes in SQLite. Web access uses cryptographically random server-side session tokens. Only token hashes are stored in SQLite, and protected routes validate the cookie token against the `sessions` table on every request. Login replaces prior sessions for the admin user, logout deletes the active session row, idle sessions expire after 8 hours, and absolute session lifetime is 24 hours. Each authenticated session also has a server-side CSRF token that is rendered into authenticated POST forms. Authenticated POST requests must present that CSRF token and an `Origin` header matching the same local app origin.
 
-Do not expose the app directly to a network until SSRF protections, response limits, safe error handling, browser security headers, upload hardening, deployment settings, and logging rules are reviewed under the Strict profile.
+Route and form input is validated before unsafe conversions. Malformed asset or finding IDs return safe client errors, invalid numeric form fields return actionable validation messages, and unexpected web handler failures render a generic 500 page without exception types, stack traces, internal paths, raw credentialed URLs, or token-like values.
+
+Do not expose the app directly to a network until browser security headers, upload hardening, deployment settings, and logging rules are reviewed under the Strict profile.
 
 ## Architectural Decisions
 

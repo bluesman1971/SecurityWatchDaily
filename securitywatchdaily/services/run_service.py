@@ -62,7 +62,7 @@ def run_watch(conn: sqlite3.Connection, *, offline_sample: bool = False, force_v
             except AppError as exc:
                 source_status[source.name] = exc.detail or exc.message
             except Exception as exc:
-                source_status[source.name] = f"Unexpected collector error: {type(exc).__name__}: {exc}"
+                source_status[source.name] = f"Unexpected collector error: {type(exc).__name__}."
 
     findings = deduplicate_findings(findings)
     visible, suppressed = apply_trace(conn, findings, run_id)

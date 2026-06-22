@@ -179,6 +179,9 @@ Tests:
 
 ## Phase 6: Response Size and Runtime Limits
 
+Status: external HTTP response size and timeout limits are implemented. CSV upload row-count hardening remains deferred
+to the upload and multipart hardening phase.
+
 Goal: prevent malicious or broken feeds from exhausting memory, CPU, or worker threads.
 
 Implementation:
@@ -204,6 +207,10 @@ Tests:
 - Excessive row count is rejected with an actionable message.
 
 ## Phase 7: Safer Error Handling
+
+Status: implemented. Malformed asset and finding route IDs fail with safe client errors, invalid numeric platform form
+fields return actionable validation messages, and unexpected web handler failures render a generic 500 page without
+exception details.
 
 Goal: keep implementation details out of browser responses.
 

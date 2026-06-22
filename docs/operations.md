@@ -69,9 +69,10 @@ Intune connector notes:
 ## Troubleshooting
 
 - If a source fails, check the dashboard source status. Other sources should still complete.
-- Source URLs and connector setup-test URLs must use public HTTPS endpoints. Fetches that resolve to localhost, private networks, link-local ranges, multicast ranges, IPv6 unique-local/link-local ranges, or metadata services are blocked before connecting. Redirects are not followed; use the final HTTPS feed URL directly.
+- Source URLs and connector setup-test URLs must use public HTTPS endpoints. Fetches that resolve to localhost, private networks, link-local ranges, multicast ranges, IPv6 unique-local/link-local ranges, or metadata services are blocked before connecting. Redirects are not followed; use the final HTTPS feed URL directly. External feed responses are limited to 5 MB and use a 20-second request timeout; oversized or timing-out sources are recorded as source failures while the rest of the run continues.
 - If a connector fails, check its detail page for last failure, sync-run errors, and per-record import errors. Vulnerability collection and CSV import should still work.
 - If a platform produces noisy matches, add exclude keywords and use more specific phrases.
+- If the web UI shows an unexpected local error, the browser response intentionally omits internal details. Check the local terminal output and retry after fixing the underlying configuration or data issue.
 - If the database cannot be opened, check write permissions in the project folder.
 - If the UI is unreachable, confirm the local server printed `http://127.0.0.1:8765`.
 - If login fails on a new database, confirm `python3 -m securitywatchdaily create-admin` has been run for that database path.
@@ -87,5 +88,5 @@ Intune connector notes:
 - Session cookies are `HttpOnly`, `SameSite=Strict`, and scoped to `/`. They intentionally omit `Secure` for localhost HTTP until HTTPS or reviewed shared-mode support is added.
 - Non-loopback hosts such as `0.0.0.0`, `::`, or LAN addresses are rejected in local mode. The `--shared`
   flag exists as an explicit future shared-mode request, but startup still fails closed until later shared-mode
-  prerequisites such as SSRF protections, response limits, browser security headers, audit events, and secure
-  deployment settings are implemented.
+  prerequisites such as browser security headers, upload hardening, audit events, and secure deployment settings
+  are implemented.

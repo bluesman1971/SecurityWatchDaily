@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
-import json
 import ipaddress
-import re
 import hmac
+import json
+import re
+import sys
+import traceback
 from http.cookies import SimpleCookie
 from contextlib import contextmanager
 from http import HTTPStatus
@@ -140,7 +142,7 @@ class SecurityWatchHandler(BaseHTTPRequestHandler):
         except AppError as exc:
             self.respond(page("Error", "<section class='panel'><h1>Something needs attention</h1></section>", error=exc.detail or exc.message), HTTPStatus.BAD_REQUEST)
         except Exception as exc:
-            self.respond(page("Error", "<section class='panel'><h1>Unexpected local error</h1><p class='muted'>Check the terminal log for details.</p></section>", error=f"{type(exc).__name__}: {exc}"), HTTPStatus.INTERNAL_SERVER_ERROR)
+            self._handle_unexpected_error(exc)
 
     def do_POST(self) -> None:
         parsed = urlparse(self.path)
@@ -205,6 +207,8 @@ class SecurityWatchHandler(BaseHTTPRequestHandler):
                 self.redirect("/")
         except AppError as exc:
             self.respond(page("Error", "<section class='panel'><h1>Could not complete the action</h1></section>", error=exc.detail or exc.message), HTTPStatus.BAD_REQUEST)
+        except Exception as exc:
+            self._handle_unexpected_error(exc)
 
     def read_form(self) -> dict[str, str]:
         length = int(self.headers.get("Content-Length", "0") or "0")
@@ -277,6 +281,30 @@ class SecurityWatchHandler(BaseHTTPRequestHandler):
 
     def forbidden(self) -> None:
         self.respond(page("Forbidden", "<section class='panel'><h1>Forbidden</h1></section>"), HTTPStatus.FORBIDDEN)
+
+    def _parse_route_id(self, path: str, prefix: str, label: str) -> int:
+        raw = path.removeprefix(prefix).strip("/")
+        if not raw or not raw.isdecimal():
+            raise AppError(f"{label} not found.", detail=f"The requested {label.lower()} was not found.")
+        return int(raw)
+
+    def _parse_optional_int_field(self, form: dict[str, str], field_name: str, label: str, *, default: int = 0) -> int:
+        raw = form.get(field_name, "").strip()
+        if not raw:
+            return default
+        try:
+            return int(raw)
+        except ValueError as exc:
+            raise AppError(f"{label} is invalid.", detail=f"{label} must be a whole number.") from exc
+
+    def _handle_unexpected_error(self, exc: Exception) -> None:
+        self._log_unexpected_error(exc)
+        body = "<section class='panel'><h1>Unexpected local error</h1><p class='muted'>The request failed safely. Check the local terminal for details.</p></section>"
+        self.respond(page("Error", body, error="The request failed safely. No internal details were shown."), HTTPStatus.INTERNAL_SERVER_ERROR)
+
+    def _log_unexpected_error(self, exc: Exception) -> None:
+        details = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+        print(_redact_error_details(details), file=sys.stderr)
 
     def parse_multipart(self, raw: bytes, content_type: str) -> dict[str, str]:
         boundary_match = re.search(r"boundary=(?P<boundary>[^;]+)", content_type)
@@ -780,7 +808,7 @@ class SecurityWatchHandler(BaseHTTPRequestHandler):
         self.respond(page("Import assets", body))
 
     def asset_detail(self, path: str) -> None:
-        asset_id = int(path.removeprefix("/assets/") or "0")
+        asset_id = self._parse_route_id(path, "/assets/", "Asset")
         with self.context.connection() as conn:
             asset = get_asset(conn, asset_id)
             if not asset:
@@ -805,7 +833,7 @@ class SecurityWatchHandler(BaseHTTPRequestHandler):
         self.respond(page(asset.hostname, body))
 
     def finding_detail(self, path: str) -> None:
-        finding_id = int(path.removeprefix("/findings/") or "0")
+        finding_id = self._parse_route_id(path, "/findings/", "Finding")
         with self.context.connection() as conn:
             finding = get_finding(conn, finding_id)
             if not finding:
@@ -834,7 +862,7 @@ class SecurityWatchHandler(BaseHTTPRequestHandler):
             vendors=split_csv(form.get("vendors", "")),
             keywords=split_csv(form.get("keywords", "")),
             exclude_keywords=split_csv(form.get("exclude_keywords", "")),
-            minimum_cve_year=int(form.get("minimum_cve_year", "0") or "0"),
+            minimum_cve_year=self._parse_optional_int_field(form, "minimum_cve_year", "Minimum CVE year"),
             default_priority=form.get("default_priority", "Medium"),
             msrc_title_keywords=split_csv(form.get("msrc_title_keywords", "")),
             cisa_keywords=split_csv(form.get("cisa_keywords", "")),
@@ -942,13 +970,23 @@ def _is_loopback_bind_host(host: str) -> bool:
         return False
 
 
+def _redact_error_details(details: str) -> str:
+    redacted = re.sub(r"(?i)(bearer\s+)[A-Za-z0-9._~+/=-]+", r"\1[redacted]", details)
+    redacted = re.sub(
+        r"(?i)((?:[A-Z0-9_-]*(?:api[_-]?key|client[_-]?secret|csrf[_-]?token|session[_-]?(?:id|token)?)|swd_session)\s*[=:]\s*)[^\s&;]+",
+        r"\1[redacted]",
+        redacted,
+    )
+    return re.sub(r"(https?://[^/\s:@]+:)[^@\s/]+(@)", r"\1[redacted]\2", redacted)
+
+
 def _validate_bind_mode(host: str, *, shared: bool) -> None:
     if shared:
         raise AppError(
             "Shared mode is not available yet.",
             detail=(
-                "Refusing to start with --shared until response limits, safe error handling, browser security headers, "
-                "audit events, and HTTPS or reverse-proxy deployment settings are implemented."
+                "Refusing to start with --shared until browser security headers, upload hardening, audit events, "
+                "and HTTPS or reverse-proxy deployment settings are implemented."
             ),
         )
     if not _is_loopback_bind_host(host):

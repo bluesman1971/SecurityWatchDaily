@@ -35,7 +35,9 @@ The local web UI requires an admin login. Admin passwords are stored only as sal
 
 Route and form input is validated before unsafe conversions. Malformed asset or finding IDs return safe client errors, invalid numeric form fields return actionable validation messages, and unexpected web handler failures render a generic 500 page without exception types, stack traces, internal paths, raw credentialed URLs, or token-like values.
 
-Do not expose the app directly to a network until browser security headers, upload hardening, deployment settings, and logging rules are reviewed under the Strict profile.
+Browser-facing HTML responses include a strict same-origin content security policy, disable browser caching, prevent MIME sniffing, and suppress referrer leakage. Static CSS keeps its explicit content type and `nosniff` behavior.
+
+Do not expose the app directly to a network until upload hardening, deployment settings, and logging rules are reviewed under the Strict profile.
 
 ## Architectural Decisions
 

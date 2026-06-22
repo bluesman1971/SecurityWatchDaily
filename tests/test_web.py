@@ -39,6 +39,10 @@ class WebTests(unittest.TestCase):
         self.tmp.cleanup()
 
     def request(self, method, path, body=None, headers=None):
+        status, data, response_headers = self.request_with_headers(method, path, body=body, headers=headers)
+        return status, data, response_headers.get("Set-Cookie")
+
+    def request_with_headers(self, method, path, body=None, headers=None):
         headers = dict(headers or {})
         if self.cookie:
             headers.setdefault("Cookie", self.cookie)
@@ -50,9 +54,9 @@ class WebTests(unittest.TestCase):
         conn.request(method, path, body=body, headers=headers)
         response = conn.getresponse()
         data = response.read().decode("utf-8")
-        set_cookie = response.getheader("Set-Cookie")
+        response_headers = {name: value for name, value in response.getheaders()}
         conn.close()
-        return response.status, data, set_cookie
+        return response.status, data, response_headers
 
     def login(self):
         previous_cookie = getattr(self, "cookie", "")
@@ -89,6 +93,25 @@ class WebTests(unittest.TestCase):
         status, data, _ = self.request("GET", "/")
         self.assertEqual(status, 200)
         self.assertIn("Daily vulnerability watch", data)
+
+    def test_html_routes_include_security_headers(self):
+        for path in ["/", "/login"]:
+            with self.subTest(path=path):
+                status, _, headers = self.request_with_headers("GET", path)
+                self.assertIn(status, {200, 401})
+                self.assertEqual(
+                    headers.get("Content-Security-Policy"),
+                    "default-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
+                )
+                self.assertEqual(headers.get("X-Content-Type-Options"), "nosniff")
+                self.assertEqual(headers.get("Referrer-Policy"), "no-referrer")
+                self.assertEqual(headers.get("Cache-Control"), "no-store")
+
+    def test_static_css_keeps_content_type_and_nosniff(self):
+        status, _, headers = self.request_with_headers("GET", "/static/app.css")
+        self.assertEqual(status, 200)
+        self.assertEqual(headers.get("Content-Type"), "text/css; charset=utf-8")
+        self.assertEqual(headers.get("X-Content-Type-Options"), "nosniff")
 
     def test_malformed_asset_and_finding_ids_fail_safely(self):
         for path, label in [("/assets/not-an-int", "requested asset was not found"), ("/findings/not-an-int", "requested finding was not found")]:

@@ -33,8 +33,8 @@ class SharedModeGateTests(unittest.TestCase):
             with self.assertRaises(AppError) as ctx:
                 serve("0.0.0.0", 0, Path(tmp) / "app.sqlite3", shared=True)
         self.assertIn("Shared mode is not available yet", ctx.exception.message)
-        self.assertIn("browser security headers", ctx.exception.detail)
         self.assertIn("upload hardening", ctx.exception.detail)
+        self.assertIn("audit events", ctx.exception.detail)
 
     def test_cli_accepts_explicit_shared_flag(self):
         parser = build_parser()

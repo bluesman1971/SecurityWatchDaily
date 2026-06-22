@@ -334,12 +334,19 @@ class SecurityWatchHandler(BaseHTTPRequestHandler):
         content_type: str = "text/html; charset=utf-8",
         headers: dict[str, str] | None = None,
     ) -> None:
-        if content_type.startswith("text/html"):
+        is_html = content_type.startswith("text/html")
+        if is_html:
             body = self._inject_csrf_inputs(body)
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Referrer-Policy", "no-referrer")
+        if is_html:
+            self.send_header(
+                "Content-Security-Policy",
+                "default-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
+            )
+            self.send_header("Cache-Control", "no-store")
         for name, value in (headers or {}).items():
             self.send_header(name, value)
         self.end_headers()
@@ -985,8 +992,8 @@ def _validate_bind_mode(host: str, *, shared: bool) -> None:
         raise AppError(
             "Shared mode is not available yet.",
             detail=(
-                "Refusing to start with --shared until browser security headers, upload hardening, audit events, "
-                "and HTTPS or reverse-proxy deployment settings are implemented."
+                "Refusing to start with --shared until upload hardening, audit events, and HTTPS or reverse-proxy "
+                "deployment settings are implemented."
             ),
         )
     if not _is_loopback_bind_host(host):

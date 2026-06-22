@@ -86,7 +86,7 @@ Intune connector notes:
 - The web UI requires a local admin login. Passwords and raw session tokens are never stored in plaintext.
 - Manage additional local admin users from **Admin** after creating the first bootstrap account.
 - Session cookies are `HttpOnly`, `SameSite=Strict`, and scoped to `/`. They intentionally omit `Secure` for localhost HTTP until HTTPS or reviewed shared-mode support is added.
+- HTML responses include restrictive browser security headers, including a self-only content security policy and `Cache-Control: no-store`.
 - Non-loopback hosts such as `0.0.0.0`, `::`, or LAN addresses are rejected in local mode. The `--shared`
   flag exists as an explicit future shared-mode request, but startup still fails closed until later shared-mode
-  prerequisites such as browser security headers, upload hardening, audit events, and secure deployment settings
-  are implemented.
+  prerequisites such as upload hardening, audit events, and secure deployment settings are implemented.

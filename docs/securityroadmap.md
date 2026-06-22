@@ -232,6 +232,9 @@ Tests:
 
 ## Phase 8: Browser Security Headers
 
+Status: implemented. HTML responses include a strict self-only CSP, `no-store` caching, `nosniff`, and no-referrer
+headers. Static CSS keeps its content type and `nosniff` behavior.
+
 Goal: reduce browser-side exploitability if a rendering bug is introduced later.
 
 Implementation:

@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 
 VALID_PRIORITIES = {"Critical", "High", "Medium", "Watch", "Info"}
 MATCH_CONFIDENCES = {"confirmed affected", "likely affected", "needs review", "not affected", "unknown"}
+CONNECTOR_STATUSES = {"available", "enabled", "disabled", "error"}
 
 
 @dataclass(frozen=True)
@@ -129,3 +130,49 @@ class FindingAssetMatch:
     confidence: str
     reason: str
     review_state: str = ""
+
+
+@dataclass(frozen=True)
+class Connector:
+    id: str
+    name: str
+    connector_type: str
+    description: str
+    enabled: bool = False
+    settings_json: str = "{}"
+    last_successful_sync: str = ""
+    last_failed_sync: str = ""
+    last_error: str = ""
+    imported_asset_count: int = 0
+    imported_component_count: int = 0
+
+
+@dataclass(frozen=True)
+class ConnectorSyncRun:
+    id: int | None
+    connector_id: str
+    started_at: str
+    finished_at: str = ""
+    status: str = "running"
+    action: str = "sync"
+    imported_asset_count: int = 0
+    imported_component_count: int = 0
+    error: str = ""
+
+
+@dataclass(frozen=True)
+class ConnectorImportError:
+    id: int | None
+    sync_run_id: int
+    connector_id: str
+    external_id: str
+    field: str
+    message: str
+
+
+@dataclass(frozen=True)
+class ConnectorAssetMapping:
+    id: int | None
+    connector_id: str
+    external_id: str
+    asset_id: int

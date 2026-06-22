@@ -9,7 +9,7 @@ from pathlib import Path
 from .errors import StorageError
 
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 5
 
 
 def connect(db_path: Path) -> sqlite3.Connection:
@@ -31,6 +31,27 @@ def initialize(conn: sqlite3.Connection) -> None:
               key TEXT PRIMARY KEY,
               value TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS users (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              username TEXT NOT NULL UNIQUE,
+              password_hash TEXT NOT NULL,
+              role TEXT NOT NULL,
+              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              last_login_at TEXT NOT NULL DEFAULT ''
+            );
+            CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
+            CREATE TABLE IF NOT EXISTS sessions (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+              token_hash TEXT NOT NULL UNIQUE,
+              csrf_token TEXT NOT NULL,
+              created_at TEXT NOT NULL,
+              last_seen_at TEXT NOT NULL,
+              absolute_expires_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_sessions_token_hash ON sessions(token_hash);
+            CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
             CREATE TABLE IF NOT EXISTS platforms (
               id TEXT PRIMARY KEY,
               display_name TEXT NOT NULL,
@@ -162,6 +183,52 @@ def initialize(conn: sqlite3.Connection) -> None:
             );
             CREATE INDEX IF NOT EXISTS idx_finding_asset_matches_finding_id ON finding_asset_matches(finding_id);
             CREATE INDEX IF NOT EXISTS idx_finding_asset_matches_asset_id ON finding_asset_matches(asset_id);
+            CREATE TABLE IF NOT EXISTS connectors (
+              id TEXT PRIMARY KEY,
+              name TEXT NOT NULL,
+              connector_type TEXT NOT NULL,
+              description TEXT NOT NULL DEFAULT '',
+              enabled INTEGER NOT NULL DEFAULT 0,
+              settings_json TEXT NOT NULL DEFAULT '{}',
+              last_successful_sync TEXT NOT NULL DEFAULT '',
+              last_failed_sync TEXT NOT NULL DEFAULT '',
+              last_error TEXT NOT NULL DEFAULT '',
+              imported_asset_count INTEGER NOT NULL DEFAULT 0,
+              imported_component_count INTEGER NOT NULL DEFAULT 0,
+              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE TABLE IF NOT EXISTS connector_sync_runs (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              connector_id TEXT NOT NULL REFERENCES connectors(id) ON DELETE CASCADE,
+              started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              finished_at TEXT NOT NULL DEFAULT '',
+              status TEXT NOT NULL,
+              action TEXT NOT NULL DEFAULT 'sync',
+              imported_asset_count INTEGER NOT NULL DEFAULT 0,
+              imported_component_count INTEGER NOT NULL DEFAULT 0,
+              error TEXT NOT NULL DEFAULT ''
+            );
+            CREATE INDEX IF NOT EXISTS idx_connector_sync_runs_connector_id ON connector_sync_runs(connector_id);
+            CREATE TABLE IF NOT EXISTS connector_import_errors (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              sync_run_id INTEGER NOT NULL REFERENCES connector_sync_runs(id) ON DELETE CASCADE,
+              connector_id TEXT NOT NULL REFERENCES connectors(id) ON DELETE CASCADE,
+              external_id TEXT NOT NULL DEFAULT '',
+              field TEXT NOT NULL DEFAULT '',
+              message TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_connector_import_errors_run_id ON connector_import_errors(sync_run_id);
+            CREATE TABLE IF NOT EXISTS connector_asset_mappings (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              connector_id TEXT NOT NULL REFERENCES connectors(id) ON DELETE CASCADE,
+              external_id TEXT NOT NULL,
+              asset_id INTEGER NOT NULL REFERENCES assets(id) ON DELETE CASCADE,
+              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              UNIQUE(connector_id, external_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_connector_asset_mappings_asset_id ON connector_asset_mappings(asset_id);
             CREATE TABLE IF NOT EXISTS trace_items (
               key TEXT PRIMARY KEY,
               first_seen TEXT NOT NULL,
@@ -172,6 +239,14 @@ def initialize(conn: sqlite3.Connection) -> None:
               platform TEXT NOT NULL,
               times_seen INTEGER NOT NULL
             );
+            """
+        )
+        _ensure_column(conn, "sessions", "csrf_token", "TEXT NOT NULL DEFAULT ''")
+        conn.execute(
+            """
+            UPDATE sessions
+            SET csrf_token = lower(hex(randomblob(32)))
+            WHERE csrf_token = ''
             """
         )
         conn.execute(
@@ -195,3 +270,9 @@ def loads_list(value: str) -> list[str]:
 def loads_dict(value: str) -> dict[str, str]:
     parsed = json.loads(value or "{}")
     return {str(k): str(v) for k, v in parsed.items()}
+
+
+def _ensure_column(conn: sqlite3.Connection, table: str, column: str, definition: str) -> None:
+    columns = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
+    if column not in columns:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")

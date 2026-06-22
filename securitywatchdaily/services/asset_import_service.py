@@ -157,7 +157,7 @@ def validate_row(row_number: int, row: dict[str, str]) -> list[ImportErrorDetail
         errors.append(ImportErrorDetail(row_number, "last_seen", "Use YYYY-MM-DD format."))
     if len(row.get("hostname", "")) > 255:
         errors.append(ImportErrorDetail(row_number, "hostname", "Hostname must be 255 characters or fewer."))
-    for field in ("vendor", "product", "platform", "version"):
-        if len(row.get(field, "")) > 255:
-            errors.append(ImportErrorDetail(row_number, field, "Value must be 255 characters or fewer."))
+    for field_name in ("vendor", "product", "platform", "version"):
+        if len(row.get(field_name, "")) > 255:
+            errors.append(ImportErrorDetail(row_number, field_name, "Value must be 255 characters or fewer."))
     return errors

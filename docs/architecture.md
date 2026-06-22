@@ -5,8 +5,9 @@ SecurityWatchDaily is split into small modules so collection, matching, storage,
 ## Components
 
 - `collectors/`: source-specific fetch and parse logic.
-- `services/`: run orchestration, matching, trace suppression, validation support, and import flow.
-- `repositories/`: SQLite persistence for platforms, sources, runs, findings, and trace items.
+- `services/`: run orchestration, matching, trace suppression, validation support, CSV import, and connector sync flow.
+- `repositories/`: SQLite persistence for platforms, sources, runs, findings, trace items, assets, and connector state.
+- `auth.py`: local admin user creation, password hashing, and credential verification.
 - `web/`: local HTTP server, HTML rendering, and CSS.
 - `cli.py`: local commands for setup, scheduled runs, and serving the UI.
 
@@ -18,22 +19,37 @@ SecurityWatchDaily is split into small modules so collection, matching, storage,
 4. Findings are deduplicated by key.
 5. Trace state suppresses unchanged findings.
 6. Runs and findings are saved for local review.
-7. Finding products and asset matches are refreshed from the saved run data.
-8. The web UI reads the same database as the CLI.
+7. CSV imports and connector syncs map inventory into `assets` and `asset_components`.
+8. Finding products and asset matches are refreshed from the saved run data and current inventory.
+9. The web UI reads the same database as the CLI.
 
 ## Trust Boundary
 
-External source content and imported CSV inventory content are untrusted. They are parsed into structured records, validated at import boundaries, stored with parameterized SQLite statements, and escaped before browser rendering.
+External source content, connector inventory content, and imported CSV inventory content are untrusted. They are parsed into structured records, validated at import boundaries, stored with parameterized SQLite statements, and escaped before browser rendering.
 
-The first version is local-only and has no authentication. Do not expose it directly to a network until auth, authorization, CSRF protection, deployment settings, and logging rules are reviewed under the Strict profile.
+Connector credentials are secrets. They are read from local environment variables or future local-only secret handling, not stored in SQLite connector settings, committed files, sync runs, import errors, or browser-rendered pages.
+
+External collector fetches and connector setup checks use the shared safe HTTP helper in `collectors/http.py`. That path allows HTTPS URLs, resolves hostnames before connecting, blocks loopback, private, link-local, multicast, IPv6 unique-local/link-local, unspecified, and cloud metadata addresses, disables proxy use for these fetches, and does not follow redirects. Freshservice setup checks may send a local Basic Authorization header to the validated tenant URL, but connector errors must not include encoded tokens or raw secret values.
+
+The local web UI requires an admin login. Admin passwords are stored only as salted PBKDF2-SHA256 password hashes in SQLite. Web access uses cryptographically random server-side session tokens. Only token hashes are stored in SQLite, and protected routes validate the cookie token against the `sessions` table on every request. Login replaces prior sessions for the admin user, logout deletes the active session row, idle sessions expire after 8 hours, and absolute session lifetime is 24 hours. Each authenticated session also has a server-side CSRF token that is rendered into authenticated POST forms. Authenticated POST requests must present that CSRF token and an `Origin` header matching the same local app origin.
+
+Do not expose the app directly to a network until SSRF protections, response limits, safe error handling, browser security headers, upload hardening, deployment settings, and logging rules are reviewed under the Strict profile.
 
 ## Architectural Decisions
 
 ### Local-first application
 
-SecurityWatchDaily starts as a local app bound to `127.0.0.1`. This keeps early setup simple and avoids introducing authentication, authorization, hosting, and multi-tenant boundaries before the workflow is proven.
+SecurityWatchDaily starts as a local app bound to `127.0.0.1`. Local admin authentication protects the browser control surface while keeping hosting and multi-tenant boundaries out of scope until the workflow is proven.
 
 If the app becomes network-hosted, that work should be reviewed under the Strict profile because it changes trust boundaries and introduces user/session/security concerns.
+
+### Local admin authentication
+
+The Phase 2 authentication model starts with one role: `admin`. Operators bootstrap the first local admin with `python3 -m securitywatchdaily create-admin`; the CLI prompts for a password and stores only a salted PBKDF2-SHA256 hash. After bootstrap, authenticated admins can add or delete other local admin users from the web UI. Deleting a user removes that user's active sessions, and the current user cannot delete its own account from the panel.
+
+The standard-library hash design avoids adding a packaging dependency before the project has a dependency lock file. Argon2id remains preferred for a future dependency-backed password-hashing upgrade when package installation and lockfile management are in place.
+
+Session records are stored in SQLite as SHA-256 hashes of high-entropy random cookie tokens. The raw token is only returned to the browser in the `swd_session` cookie and is not stored server-side. The cookie is `HttpOnly`, `SameSite=Strict`, and scoped to `/`; the `Secure` attribute remains off for localhost HTTP and should be enabled only when HTTPS or reviewed shared-mode deployment support exists.
 
 ### Standard library web layer for phase 1
 
@@ -88,11 +104,17 @@ Connectors should map external inventory into the same internal asset/component 
 
 Connector credentials must not be stored in tracked files. Use environment variables or a local secret store and keep connector settings separate from secrets.
 
+The current connector catalog stores connector metadata and non-secret settings in `connectors`, sync attempts in `connector_sync_runs`, per-record validation failures in `connector_import_errors`, and external-ID-to-asset links in `connector_asset_mappings`.
+
+The first working connector is `Sample Inventory`, a deterministic local fixture used to prove the framework, UI, health model, import mapping, and match refresh flow without external credentials. Freshservice, Jamf, and Intune are present as read-only shells with setup validation and clear errors until tenant-specific endpoint and auth work is completed.
+
 ### Read-only connector posture
 
 Inventory connectors should be read-only by default. Their job is to pull asset and software/hardware state into SecurityWatchDaily, not to mutate source-of-truth systems.
 
 Connector errors should be actionable. Permission problems, missing modules, tenant-specific endpoint differences, and network failures should be reported distinctly.
+
+Connector sync failures update connector health and sync-run state but do not block vulnerability collection or CSV import. CSV remains the primary fallback and troubleshooting path.
 
 ### Version-aware matching with confidence
 

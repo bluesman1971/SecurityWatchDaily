@@ -4,8 +4,18 @@ version = "0.1.0"
 description = "Local daily vulnerability watch tool for customer-managed platforms."
 requires-python = ">=3.11"
 
+[project.optional-dependencies]
+dev = [
+  "pip-audit==2.10.1",
+  "ruff==0.15.18",
+  "semgrep==1.167.0",
+]
+
 [tool.ruff]
 line-length = 120
+
+[tool.setuptools.packages.find]
+include = ["securitywatchdaily*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

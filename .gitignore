@@ -8,3 +8,4 @@ trace_state*.json
 reports/
 .venv/
 venv/
+vuln_watch.py

@@ -47,7 +47,7 @@ def validate_source(source: Source, existing_ids: set[str] | None = None) -> Non
     parsed = urlparse(source.url)
     if source.source_type == "msrc" and not source.url:
         pass
-    elif parsed.scheme not in {"http", "https"} or not parsed.netloc:
-        errors.append("Source URL must be a valid http or https URL.")
+    elif parsed.scheme != "https" or not parsed.netloc:
+        errors.append("Source URL must be a valid https URL.")
     if errors:
         raise ConfigValidationError("Source could not be saved.", detail=" ".join(errors))

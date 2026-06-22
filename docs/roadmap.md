@@ -63,6 +63,8 @@ Phase 2 acceptance criteria:
 
 ## Phase 3: Source-Of-Truth Connectors
 
+Status: started with a local connector framework, catalog UI, health model, sample inventory connector, and read-only Freshservice/Jamf/Intune connector shells.
+
 Goal: let teams choose the inventory systems they actually use and keep asset data refreshed without manual CSV exports.
 
 Decision: connectors come after CSV impact matching. The matching model should be proven with CSV before adding vendor-specific auth, API limits, schemas, and permissions.
@@ -99,6 +101,12 @@ Phase 3 acceptance criteria:
 - Connector syncs update the asset/component inventory without changing matching logic.
 - The UI shows sync health and actionable errors.
 - No connector secrets are committed, logged, or rendered in the browser.
+
+First vertical slice:
+
+- `Sample Inventory` proves connector sync, health/status persistence, import-error persistence, asset/component import, external-ID mapping, and asset-match refresh without external credentials.
+- Freshservice validates environment setup and can perform a read-only endpoint check when `FRESHSERVICE_TEST_PATH` is supplied. Tenant-specific asset/software sync remains deferred until the correct endpoint paths and permissions are confirmed.
+- Jamf is cataloged as a read-only connector shell with setup guidance. Intune now has a setup page for non-secret Microsoft Graph tenant/client metadata and local env-var names; live sync is deferred until Microsoft Graph OAuth and tenant consent are implemented.
 
 ## Later Possibilities
 

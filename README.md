@@ -6,22 +6,27 @@ It imports an optional `watchlist.json`, stores editable platforms and sources i
 
 ## Current Scope
 
-- Local-only web UI for dashboards, platforms, sources, runs, and findings.
+- Local-only web UI for dashboards, platforms, sources, runs, findings, and inventory connectors.
 - Assets section for CSV inventory import, asset details, and impacted asset views.
+- Connector Catalog with read-only source-of-truth inventory connector status, test, and sync actions.
 - SQLite-backed configuration and run history.
-- SQLite-backed assets, asset components, product aliases, finding products, version ranges, and materialized asset matches.
+- SQLite-backed assets, asset components, product aliases, finding products, version ranges, materialized asset matches, connector status, sync runs, import errors, and connector asset mappings.
 - Source-level error handling so one broken feed does not stop the daily run.
-- No credentials, API keys, connector integrations, user accounts, or cloud deployment in the first version.
+- Local admin authentication for the web UI with SQLite-backed server-side sessions, CSRF-protected POST forms, and same-origin POST checks. Passwords are stored only as salted password hashes, and raw session tokens are not stored in SQLite.
+- No cloud deployment in the first version.
 
 ## Run Locally
 
 ```bash
 python3 -m securitywatchdaily init
+python3 -m securitywatchdaily create-admin
 python3 -m securitywatchdaily run --sample --force-visible
 python3 -m securitywatchdaily serve
 ```
 
-Open `http://127.0.0.1:8765`.
+Open `http://127.0.0.1:8765` and log in with the admin user you created.
+
+Authenticated browser forms include per-session CSRF tokens. If a state-changing action returns `403`, refresh the current page after logging in again and retry from the local UI.
 
 If that port is busy, choose another:
 
@@ -35,13 +40,14 @@ python3 -m securitywatchdaily serve --port 8876
 python3 -m securitywatchdaily validate
 python3 -m securitywatchdaily summary
 python3 -m securitywatchdaily run
+python3 -m securitywatchdaily create-admin --username admin
 ```
 
 Use `run --sample` to validate the local workflow without relying on network access.
 
 ## CSV Asset Inventory
 
-Use **Assets > Import CSV** in the local web UI to upload or paste inventory rows. CSV remains the primary Phase 2 workflow; Freshservice, Jamf, Intune, and other source-of-truth connectors are planned for a later phase.
+Use **Assets > Import CSV** in the local web UI to upload or paste inventory rows. CSV remains the primary fallback and troubleshooting workflow even when connectors are enabled.
 
 For a step-by-step walkthrough, see [instructions.md](instructions.md). A safe example inventory is available at [sample_asset_inventory.csv](sample_asset_inventory.csv).
 
@@ -59,6 +65,26 @@ Notes:
 - Product aliases normalize common variants such as `Windows 11 Pro`, `Microsoft Windows 11`, `PANOS`, and `PAN-OS`.
 - Impact confidence labels are `confirmed affected`, `likely affected`, `needs review`, `not affected`, and `unknown`.
 
+## Inventory Connectors
+
+Use **Connectors** in the local web UI to view available inventory connectors, enable or disable them, test setup, and run syncs. Phase 3 starts with a working **Sample Inventory** connector that imports deterministic fixture assets into the same asset/component model used by CSV import.
+
+Freshservice, Jamf, and Microsoft Intune are present as read-only connector shells with setup validation and actionable errors. Intune includes a setup page for tenant/client metadata and local environment variable names. Credentials are read from local environment variables and are not stored in SQLite, rendered in the browser, or committed.
+
+Connector setup variables:
+
+```bash
+FRESHSERVICE_TENANT_URL=https://yourdomain.freshservice.com
+FRESHSERVICE_API_KEY=local-api-key
+FRESHSERVICE_TEST_PATH=/api/v2/assets
+JAMF_BASE_URL=https://yourcompany.jamfcloud.com
+INTUNE_TENANT_ID=tenant-id
+INTUNE_CLIENT_ID=client-id
+INTUNE_CLIENT_SECRET=local-client-secret
+```
+
+Freshservice `403` means the API key authenticated but is not authorized for the requested module. Freshservice `404` usually means the tenant-specific endpoint path does not match. Intune setup stores only non-secret metadata and expects the Microsoft Graph application permission `DeviceManagementManagedDevices.Read.All`. Intune live sync is intentionally deferred until Microsoft Graph OAuth and tenant consent are implemented.
+
 ## Planning Docs
 
 - [Architecture](docs/architecture.md)
@@ -72,14 +98,34 @@ python3 -m compileall -q securitywatchdaily tests
 python3 -m unittest discover -s tests -v
 ```
 
+## Security Checks
+
+Install the pinned Python dev tools:
+
+```bash
+python3 -m venv .venv
+.venv/bin/python -m pip install -e ".[dev]"
+```
+
+Run the local checks:
+
+```bash
+.venv/bin/ruff check securitywatchdaily tests
+.venv/bin/semgrep scan --metrics off --config p/python --error securitywatchdaily tests
+.venv/bin/pip-audit --local
+gitleaks detect --source . --no-banner --redact
+```
+
+`gitleaks` is installed outside Python, for example with Homebrew on macOS. CI runs Ruff, Semgrep, pip-audit, Gitleaks, compile, and unittest.
+
 ## Repository Standards
 
 - Local web binding defaults to `127.0.0.1`.
 - User-editable platform and source inputs are validated before saving.
-- External source content and imported CSV content are treated as untrusted and escaped before rendering.
-- Generated databases, imported customer data, reports, run logs, caches, and trace files are ignored.
-- Tests cover matching, validation, normalization, CSV import, version handling, trace suppression, storage, friendly source errors, and practical web flows.
+- External source content, connector data, and imported CSV content are treated as untrusted and escaped before rendering.
+- Generated databases, imported customer data, reports, connector logs, run logs, caches, and trace files are ignored.
+- Tests cover matching, validation, normalization, CSV import, connector status and sync flows, version handling, trace suppression, storage, authentication, sessions, CSRF and Origin checks, friendly source errors, and practical web flows.
 
 ## Before Network Hosting
 
-Do not expose this app directly to a network without a Strict-profile review for authentication, authorization, CSRF protection, deployment settings, logging, and source-secret handling.
+Do not expose this app directly to a network without a Strict-profile review for remaining shared-mode prerequisites, including SSRF protections, response limits, safe error handling, browser security headers, upload hardening, audit logging, deployment settings, and source-secret handling.

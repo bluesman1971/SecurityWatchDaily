@@ -37,6 +37,12 @@ python3 -m securitywatchdaily run
 
 Use `run --sample` to validate the local workflow without relying on network access.
 
+## Planning Docs
+
+- [Architecture](docs/architecture.md)
+- [Roadmap](docs/roadmap.md)
+- [Operations](docs/operations.md)
+
 ## Tests
 
 ```bash

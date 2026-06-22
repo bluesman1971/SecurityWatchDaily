@@ -1,0 +1,6 @@
+hostname,owner,location,asset_type,vendor,product,version,platform,last_seen,component_type
+laptop-1,IT,HQ,laptop,Microsoft,Windows 11 Pro,10.0.22631,windows_11,2026-06-20,operating system
+laptop-1,IT,HQ,laptop,Microsoft,Microsoft Office,2405,office,2026-06-20,software
+firewall-1,Network,HQ,firewall,Palo Alto,PAN-OS,11.1.2,palo_alto_pan_os,2026-06-21,firmware
+server-1,Infrastructure,Datacenter A,server,Canonical,Ubuntu 24.04,24.04,ubuntu_lts,2026-06-19,operating system
+switch-1,Network,Branch 1,switch,Cisco,Cisco IOS XE,17.9,cisco_meraki,2026-06-18,firmware

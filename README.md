@@ -43,6 +43,8 @@ Use `run --sample` to validate the local workflow without relying on network acc
 
 Use **Assets > Import CSV** in the local web UI to upload or paste inventory rows. CSV remains the primary Phase 2 workflow; Freshservice, Jamf, Intune, and other source-of-truth connectors are planned for a later phase.
 
+For a step-by-step walkthrough, see [instructions.md](instructions.md). A safe example inventory is available at [sample_asset_inventory.csv](sample_asset_inventory.csv).
+
 Template:
 
 ```csv

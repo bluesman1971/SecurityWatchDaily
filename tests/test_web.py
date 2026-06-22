@@ -1,4 +1,5 @@
 import http.client
+import re
 import tempfile
 import threading
 import time
@@ -26,6 +27,7 @@ class WebTests(unittest.TestCase):
         self.thread.start()
         time.sleep(0.05)
         self.cookie = self.login()
+        self.csrf_token = self.fetch_csrf_token("/")
 
     def tearDown(self):
         self.server.shutdown()
@@ -37,6 +39,10 @@ class WebTests(unittest.TestCase):
         headers = dict(headers or {})
         if self.cookie:
             headers.setdefault("Cookie", self.cookie)
+        if method == "POST" and self.cookie:
+            headers.setdefault("Origin", self.origin())
+            headers.setdefault("Content-Type", "application/x-www-form-urlencoded")
+            body = self.with_csrf(body)
         conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
         conn.request(method, path, body=body, headers=headers)
         response = conn.getresponse()
@@ -59,13 +65,30 @@ class WebTests(unittest.TestCase):
         self.assertIsNotNone(set_cookie)
         return set_cookie.split(";", 1)[0]
 
+    def origin(self):
+        return f"http://127.0.0.1:{self.port}"
+
+    def fetch_csrf_token(self, path):
+        status, data, _ = self.request("GET", path)
+        self.assertEqual(status, 200)
+        match = re.search(r'name="csrf_token" value="([^"]+)"', data)
+        self.assertIsNotNone(match)
+        return match.group(1)
+
+    def with_csrf(self, body):
+        body = body or ""
+        if "csrf_token=" in body:
+            return body
+        separator = "&" if body else ""
+        return f"{body}{separator}csrf_token={self.csrf_token}"
+
     def test_dashboard_renders(self):
         status, data, _ = self.request("GET", "/")
         self.assertEqual(status, 200)
         self.assertIn("Daily vulnerability watch", data)
 
     def test_sample_run_from_web(self):
-        status, _, _ = self.request("POST", "/run-sample", body="", headers={"Content-Type": "application/x-www-form-urlencoded"})
+        status, _, _ = self.request("POST", "/run-sample", body="")
         self.assertEqual(status, 303)
         status, data, _ = self.request("GET", "/findings")
         self.assertEqual(status, 200)
@@ -77,7 +100,6 @@ class WebTests(unittest.TestCase):
             "POST",
             "/assets/import",
             body=body,
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
         )
         self.assertEqual(status, 400)
         self.assertIn("Import needs changes", data)
@@ -92,11 +114,10 @@ class WebTests(unittest.TestCase):
             "POST",
             "/assets/import",
             body=body,
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
         )
         self.assertEqual(status, 200)
         self.assertIn("Import complete", data)
-        status, _, _ = self.request("POST", "/run-sample", body="", headers={"Content-Type": "application/x-www-form-urlencoded"})
+        status, _, _ = self.request("POST", "/run-sample", body="")
         self.assertEqual(status, 303)
         status, assets, _ = self.request("GET", "/assets")
         self.assertEqual(status, 200)
@@ -125,7 +146,6 @@ class WebTests(unittest.TestCase):
             "POST",
             "/connectors/toggle",
             body=body,
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
         )
         self.assertEqual(status, 303)
 
@@ -133,18 +153,16 @@ class WebTests(unittest.TestCase):
             "POST",
             "/connectors/test",
             body="id=sample_inventory",
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
         )
         self.assertEqual(status, 200)
         self.assertIn("Sample connector is ready", test_result)
 
-        status, _, _ = self.request("POST", "/run-sample", body="", headers={"Content-Type": "application/x-www-form-urlencoded"})
+        status, _, _ = self.request("POST", "/run-sample", body="")
         self.assertEqual(status, 303)
         status, sync_result, _ = self.request(
             "POST",
             "/connectors/sync",
             body="id=sample_inventory",
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
         )
         self.assertEqual(status, 200)
         self.assertIn("2 assets and 3 components imported", sync_result)

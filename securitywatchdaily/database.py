@@ -9,7 +9,7 @@ from pathlib import Path
 from .errors import StorageError
 
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 
 def connect(db_path: Path) -> sqlite3.Connection:
@@ -41,6 +41,17 @@ def initialize(conn: sqlite3.Connection) -> None:
               last_login_at TEXT NOT NULL DEFAULT ''
             );
             CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
+            CREATE TABLE IF NOT EXISTS sessions (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+              token_hash TEXT NOT NULL UNIQUE,
+              csrf_token TEXT NOT NULL,
+              created_at TEXT NOT NULL,
+              last_seen_at TEXT NOT NULL,
+              absolute_expires_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_sessions_token_hash ON sessions(token_hash);
+            CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
             CREATE TABLE IF NOT EXISTS platforms (
               id TEXT PRIMARY KEY,
               display_name TEXT NOT NULL,
@@ -230,6 +241,14 @@ def initialize(conn: sqlite3.Connection) -> None:
             );
             """
         )
+        _ensure_column(conn, "sessions", "csrf_token", "TEXT NOT NULL DEFAULT ''")
+        conn.execute(
+            """
+            UPDATE sessions
+            SET csrf_token = lower(hex(randomblob(32)))
+            WHERE csrf_token = ''
+            """
+        )
         conn.execute(
             "INSERT OR REPLACE INTO app_meta(key, value) VALUES('schema_version', ?)",
             (str(SCHEMA_VERSION),),
@@ -251,3 +270,9 @@ def loads_list(value: str) -> list[str]:
 def loads_dict(value: str) -> dict[str, str]:
     parsed = json.loads(value or "{}")
     return {str(k): str(v) for k, v in parsed.items()}
+
+
+def _ensure_column(conn: sqlite3.Connection, table: str, column: str, definition: str) -> None:
+    columns = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
+    if column not in columns:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")

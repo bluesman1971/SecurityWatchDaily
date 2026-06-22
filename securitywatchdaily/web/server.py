@@ -5,8 +5,7 @@ from __future__ import annotations
 import json
 import ipaddress
 import re
-import secrets
-import threading
+import hmac
 from http.cookies import SimpleCookie
 from contextlib import contextmanager
 from http import HTTPStatus
@@ -14,7 +13,16 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from securitywatchdaily.auth import admin_user_count, authenticate_user, get_user_by_id
+from securitywatchdaily.auth import (
+    admin_user_count,
+    authenticate_user,
+    create_admin_user,
+    create_session,
+    delete_admin_user,
+    destroy_session,
+    list_admin_users,
+    validate_session,
+)
 from securitywatchdaily.config import database_path, legacy_watchlist_path
 from securitywatchdaily.database import connect, initialize
 from securitywatchdaily.errors import AppError
@@ -56,13 +64,12 @@ from .html import badge, esc, page
 
 STATIC_DIR = Path(__file__).with_name("static")
 MAX_POST_BYTES = 2 * 1024 * 1024
+CSRF_FIELD_NAME = "csrf_token"
 
 
 class AppContext:
     def __init__(self, db_path: Path) -> None:
         self.db_path = db_path
-        self._sessions: dict[str, int] = {}
-        self._sessions_lock = threading.Lock()
 
     @contextmanager
     def connection(self):
@@ -73,20 +80,6 @@ class AppContext:
             yield conn
         finally:
             conn.close()
-
-    def create_session(self, user_id: int) -> str:
-        token = secrets.token_urlsafe(32)
-        with self._sessions_lock:
-            self._sessions[token] = user_id
-        return token
-
-    def get_session_user_id(self, token: str) -> int | None:
-        with self._sessions_lock:
-            return self._sessions.get(token)
-
-    def destroy_session(self, token: str) -> None:
-        with self._sessions_lock:
-            self._sessions.pop(token, None)
 
 
 class SecurityWatchHandler(BaseHTTPRequestHandler):
@@ -99,6 +92,9 @@ class SecurityWatchHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
         try:
+            if self._url_contains_session_id(parsed.query):
+                self.respond(page("Bad request", "<section class='panel'><h1>Bad request</h1></section>"), HTTPStatus.BAD_REQUEST)
+                return
             if parsed.path.startswith("/static/"):
                 self.serve_static(parsed.path)
                 return
@@ -122,6 +118,7 @@ class SecurityWatchHandler(BaseHTTPRequestHandler):
                 "/assets": self.assets,
                 "/assets/import": self.asset_import_form,
                 "/connectors": self.connectors,
+                "/admin/users": self.admin_users,
             }
             handler = routes.get(parsed.path)
             if parsed.path == "/connectors/intune/setup":
@@ -148,10 +145,15 @@ class SecurityWatchHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         parsed = urlparse(self.path)
         try:
+            if self._url_contains_session_id(parsed.query):
+                self.discard_request_body()
+                self.respond(page("Bad request", "<section class='panel'><h1>Bad request</h1></section>"), HTTPStatus.BAD_REQUEST)
+                return
             if parsed.path == "/login":
                 self.login_action()
                 return
-            if not self.current_user():
+            current_user = self.current_user()
+            if not current_user:
                 self.discard_request_body()
                 self.respond(
                     page(
@@ -162,10 +164,17 @@ class SecurityWatchHandler(BaseHTTPRequestHandler):
                     HTTPStatus.UNAUTHORIZED,
                 )
                 return
+            if not self._origin_is_same_local_app():
+                self.discard_request_body()
+                self.forbidden()
+                return
+            form = self.read_form()
+            if not self._csrf_token_is_valid(form, current_user):
+                self.forbidden()
+                return
             if parsed.path == "/logout":
                 self.logout_action()
                 return
-            form = self.read_form()
             if parsed.path == "/platforms":
                 self.create_platform(form)
             elif parsed.path == "/platforms/toggle":
@@ -188,6 +197,10 @@ class SecurityWatchHandler(BaseHTTPRequestHandler):
                 self.sync_connector_action(form)
             elif parsed.path == "/connectors/intune/settings":
                 self.save_intune_connector_settings(form)
+            elif parsed.path == "/admin/users":
+                self.create_admin_user_action(form)
+            elif parsed.path == "/admin/users/delete":
+                self.delete_admin_user_action(form, current_user)
             else:
                 self.redirect("/")
         except AppError as exc:
@@ -214,15 +227,8 @@ class SecurityWatchHandler(BaseHTTPRequestHandler):
         token = self._session_cookie()
         if not token:
             return None
-        user_id = self.context.get_session_user_id(token)
-        if user_id is None:
-            return None
         with self.context.connection() as conn:
-            user = get_user_by_id(conn, user_id)
-        if not user or user["role"] != "admin":
-            self.context.destroy_session(token)
-            return None
-        return user
+            return validate_session(conn, token)
 
     def _session_cookie(self) -> str:
         cookie_header = self.headers.get("Cookie", "")
@@ -237,6 +243,40 @@ class SecurityWatchHandler(BaseHTTPRequestHandler):
         if path.startswith("/") and not path.startswith("//"):
             return path
         return "/"
+
+    def _url_contains_session_id(self, query: str) -> bool:
+        if not query:
+            return False
+        names = {name.lower() for name in parse_qs(query, keep_blank_values=True)}
+        return bool(names & {self.session_cookie_name, "session", "session_id"})
+
+    def _origin_is_same_local_app(self) -> bool:
+        origin = self.headers.get("Origin", "")
+        host_header = self.headers.get("Host", "")
+        if not origin or not host_header:
+            return False
+        parsed_origin = urlparse(origin)
+        parsed_host = urlparse(f"//{host_header}")
+        if parsed_origin.scheme != "http" or not parsed_origin.hostname or not parsed_host.hostname:
+            return False
+        try:
+            origin_port = parsed_origin.port or 80
+            host_port = parsed_host.port or 80
+        except ValueError:
+            return False
+        return (
+            _is_loopback_bind_host(parsed_origin.hostname)
+            and parsed_origin.hostname.lower() == parsed_host.hostname.lower()
+            and origin_port == host_port
+        )
+
+    def _csrf_token_is_valid(self, form: dict[str, str], current_user: object) -> bool:
+        expected = str(current_user["csrf_token"] or "")
+        supplied = form.get(CSRF_FIELD_NAME, "")
+        return bool(expected and supplied and hmac.compare_digest(expected, supplied))
+
+    def forbidden(self) -> None:
+        self.respond(page("Forbidden", "<section class='panel'><h1>Forbidden</h1></section>"), HTTPStatus.FORBIDDEN)
 
     def parse_multipart(self, raw: bytes, content_type: str) -> dict[str, str]:
         boundary_match = re.search(r"boundary=(?P<boundary>[^;]+)", content_type)
@@ -266,6 +306,8 @@ class SecurityWatchHandler(BaseHTTPRequestHandler):
         content_type: str = "text/html; charset=utf-8",
         headers: dict[str, str] | None = None,
     ) -> None:
+        if content_type.startswith("text/html"):
+            body = self._inject_csrf_inputs(body)
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("X-Content-Type-Options", "nosniff")
@@ -274,6 +316,21 @@ class SecurityWatchHandler(BaseHTTPRequestHandler):
             self.send_header(name, value)
         self.end_headers()
         self.wfile.write(body)
+
+    def _inject_csrf_inputs(self, body: bytes) -> bytes:
+        token = self._csrf_token_for_current_session()
+        if not token:
+            return body
+        html = body.decode("utf-8")
+        csrf_input = f'<input type="hidden" name="{CSRF_FIELD_NAME}" value="{esc(token)}">'
+        html = re.sub(r"(<form\b[^>]*\bmethod=[\"']post[\"'][^>]*>)", rf"\1{csrf_input}", html, flags=re.IGNORECASE)
+        return html.encode("utf-8")
+
+    def _csrf_token_for_current_session(self) -> str:
+        current = self.current_user()
+        if not current:
+            return ""
+        return str(current["csrf_token"] or "")
 
     def redirect(self, path: str, *, headers: dict[str, str] | None = None) -> None:
         self.send_response(HTTPStatus.SEE_OTHER)
@@ -327,20 +384,93 @@ class SecurityWatchHandler(BaseHTTPRequestHandler):
         if not user:
             self.login_form(error="Invalid username or password.")
             return
-        token = self.context.create_session(int(user["id"]))
+        with self.context.connection() as conn:
+            token = create_session(conn, int(user["id"]))
         self.redirect(next_path, headers={"Set-Cookie": self._session_cookie_header(token)})
 
     def logout_action(self) -> None:
         token = self._session_cookie()
         if token:
-            self.context.destroy_session(token)
+            with self.context.connection() as conn:
+                destroy_session(conn, token)
         self.redirect("/login", headers={"Set-Cookie": self._clear_session_cookie_header()})
 
     def _session_cookie_header(self, token: str) -> str:
-        return f"{self.session_cookie_name}={token}; Path=/; HttpOnly; SameSite=Lax"
+        return f"{self.session_cookie_name}={token}; Path=/; HttpOnly; SameSite=Strict"
 
     def _clear_session_cookie_header(self) -> str:
-        return f"{self.session_cookie_name}=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax"
+        return f"{self.session_cookie_name}=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict"
+
+    def admin_users(self, *, flash: str = "", error: str = "") -> None:
+        current = self.current_user()
+        if not current:
+            self.redirect("/login?next=/admin/users")
+            return
+        with self.context.connection() as conn:
+            users = list_admin_users(conn)
+        rows = "".join(
+            f"""
+            <tr>
+              <td><b>{esc(user['username'])}</b><br><span class="muted">{esc(user['role'])}</span></td>
+              <td>{esc(user['created_at'])}</td>
+              <td>{esc(user['last_login_at'] or 'Never')}</td>
+              <td>{int(user['active_sessions'])}</td>
+              <td>{self._admin_user_delete_control(user, current)}</td>
+            </tr>
+            """
+            for user in users
+        )
+        body = f"""
+        <section class="hero">
+          <div><h1>Admin users</h1><p class="muted">Manage local administrator accounts for this SecurityWatchDaily database.</p></div>
+        </section>
+        <section class="panel">
+          <h2>Add admin user</h2>
+          <form class="stack" method="post" action="/admin/users">
+            <div class="two">
+              <label>Username<input name="username" autocomplete="username" placeholder="admin2" maxlength="64"></label>
+              <label>Role<input value="admin" readonly></label>
+            </div>
+            <div class="two">
+              <label>Password<input type="password" name="password" autocomplete="new-password"></label>
+              <label>Confirm password<input type="password" name="confirm_password" autocomplete="new-password"></label>
+            </div>
+            <button>Create admin</button>
+          </form>
+        </section>
+        <section class="panel">
+          <h2>Existing admin users</h2>
+          <div class="table-wrap"><table><thead><tr><th>User</th><th>Created</th><th>Last login</th><th>Sessions</th><th>Action</th></tr></thead><tbody>{rows}</tbody></table></div>
+        </section>
+        """
+        self.respond(page("Admin users", body, flash=flash, error=error))
+
+    def _admin_user_delete_control(self, user: object, current_user: object) -> str:
+        if int(user["id"]) == int(current_user["id"]):
+            return "<span class='muted'>Current user</span>"
+        return (
+            f"<form method='post' action='/admin/users/delete'>"
+            f"<input type='hidden' name='user_id' value='{int(user['id'])}'>"
+            f"<button class='secondary'>Delete</button></form>"
+        )
+
+    def create_admin_user_action(self, form: dict[str, str]) -> None:
+        password = form.get("password", "")
+        if password != form.get("confirm_password", ""):
+            self.admin_users(error="Passwords did not match.")
+            return
+        with self.context.connection() as conn:
+            user = create_admin_user(conn, form.get("username", ""), password)
+        self.admin_users(flash=f"Admin user '{user['username']}' created.")
+
+    def delete_admin_user_action(self, form: dict[str, str], current_user: object) -> None:
+        try:
+            user_id = int(form.get("user_id", ""))
+        except ValueError as exc:
+            raise AppError("Admin user could not be deleted.", detail="The requested admin user was invalid.") from exc
+        with self.context.connection() as conn:
+            delete_admin_user(conn, user_id, current_user_id=int(current_user["id"]))
+        self.admin_users(flash="Admin user deleted.")
 
     def dashboard(self) -> None:
         with self.context.connection() as conn:
@@ -817,8 +947,8 @@ def _validate_bind_mode(host: str, *, shared: bool) -> None:
         raise AppError(
             "Shared mode is not available yet.",
             detail=(
-                "Refusing to start with --shared until CSRF protection, hardened persistent sessions, "
-                "and HTTPS or reverse-proxy deployment settings are implemented."
+                "Refusing to start with --shared until SSRF protections, response limits, safe error handling, "
+                "browser security headers, audit events, and HTTPS or reverse-proxy deployment settings are implemented."
             ),
         )
     if not _is_loopback_bind_host(host):

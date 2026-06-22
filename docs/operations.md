@@ -14,6 +14,12 @@ python3 -m securitywatchdaily serve
 
 After the server starts, open `http://127.0.0.1:8765` and log in with the admin user.
 
+Login creates a server-side session stored in SQLite as a hash of the browser cookie token. The raw session token is not stored in the database. A new login replaces any prior admin session, logout deletes the active session, idle sessions expire after 8 hours, and all sessions expire after 24 hours.
+
+Authenticated web forms include a per-session CSRF token. State-changing POST requests also require an `Origin` header matching the same local app URL, so stale pages, copied form submissions, or cross-origin requests return `403` and should be retried from the current browser page after logging in.
+
+Use **Admin** in the web UI to add or delete local admin users after the first bootstrap account exists. New users use the same `admin` role and password rules as `create-admin`. Deleting an admin user also deletes that user's active sessions. The current account cannot delete itself from the web UI.
+
 ## Daily Run
 
 For a scheduled task, run:
@@ -75,7 +81,10 @@ Intune connector notes:
 - Keep source URLs public unless secret handling has been designed.
 - Do not commit generated databases, connector logs, imported asset data, customer exports, or trace/run output.
 - Keep the server bound to `127.0.0.1` for local use.
-- The web UI requires a local admin login. Passwords are never stored in plaintext.
+- The web UI requires a local admin login. Passwords and raw session tokens are never stored in plaintext.
+- Manage additional local admin users from **Admin** after creating the first bootstrap account.
+- Session cookies are `HttpOnly`, `SameSite=Strict`, and scoped to `/`. They intentionally omit `Secure` for localhost HTTP until HTTPS or reviewed shared-mode support is added.
 - Non-loopback hosts such as `0.0.0.0`, `::`, or LAN addresses are rejected in local mode. The `--shared`
-  flag exists as an explicit future shared-mode request, but startup still fails closed until CSRF protection,
-  hardened persistent sessions, and secure deployment settings are implemented.
+  flag exists as an explicit future shared-mode request, but startup still fails closed until later shared-mode
+  prerequisites such as SSRF protections, response limits, browser security headers, audit events, and secure
+  deployment settings are implemented.

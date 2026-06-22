@@ -133,6 +133,9 @@ Routes that require CSRF coverage:
 - `/connectors/test`
 - `/connectors/sync`
 - `/connectors/intune/settings`
+- `/admin/users`
+- `/admin/users/delete`
+- `/logout`
 
 Tests:
 
@@ -140,6 +143,7 @@ Tests:
 - Each protected POST rejects invalid CSRF.
 - Each protected POST rejects bad Origin.
 - Valid authenticated same-origin POST succeeds.
+- Login remains available without CSRF until a pre-auth token flow is designed.
 
 ## Phase 5: SSRF-Safe HTTP Client
 

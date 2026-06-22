@@ -26,6 +26,7 @@ def page(title: str, body: str, *, flash: str = "", error: str = "", auth_nav: b
       <a href="/findings">Findings</a>
       <a href="/assets">Assets</a>
       <a href="/connectors">Connectors</a>
+      <a href="/admin/users">Admin</a>
       <form class="nav-form" method="post" action="/logout"><button class="link-button">Logout</button></form>
         """
         if auth_nav

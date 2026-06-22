@@ -29,9 +29,9 @@ External source content, connector inventory content, and imported CSV inventory
 
 Connector credentials are secrets. They are read from local environment variables or future local-only secret handling, not stored in SQLite connector settings, committed files, sync runs, import errors, or browser-rendered pages.
 
-The local web UI requires an admin login. Admin passwords are stored only as salted PBKDF2-SHA256 password hashes in SQLite. Web access uses process-local server-side session tokens so logout invalidates the current server process session without storing session tokens in the database.
+The local web UI requires an admin login. Admin passwords are stored only as salted PBKDF2-SHA256 password hashes in SQLite. Web access uses cryptographically random server-side session tokens. Only token hashes are stored in SQLite, and protected routes validate the cookie token against the `sessions` table on every request. Login replaces prior sessions for the admin user, logout deletes the active session row, idle sessions expire after 8 hours, and absolute session lifetime is 24 hours. Each authenticated session also has a server-side CSRF token that is rendered into authenticated POST forms. Authenticated POST requests must present that CSRF token and an `Origin` header matching the same local app origin.
 
-Do not expose the app directly to a network until CSRF protection, hardened persistent sessions, deployment settings, and logging rules are reviewed under the Strict profile.
+Do not expose the app directly to a network until SSRF protections, response limits, safe error handling, browser security headers, upload hardening, deployment settings, and logging rules are reviewed under the Strict profile.
 
 ## Architectural Decisions
 
@@ -43,11 +43,11 @@ If the app becomes network-hosted, that work should be reviewed under the Strict
 
 ### Local admin authentication
 
-The Phase 2 authentication model starts with one role: `admin`. Operators bootstrap the first local admin with `python3 -m securitywatchdaily create-admin`; the CLI prompts for a password and stores only a salted PBKDF2-SHA256 hash.
+The Phase 2 authentication model starts with one role: `admin`. Operators bootstrap the first local admin with `python3 -m securitywatchdaily create-admin`; the CLI prompts for a password and stores only a salted PBKDF2-SHA256 hash. After bootstrap, authenticated admins can add or delete other local admin users from the web UI. Deleting a user removes that user's active sessions, and the current user cannot delete its own account from the panel.
 
 The standard-library hash design avoids adding a packaging dependency before the project has a dependency lock file. Argon2id remains preferred for a future dependency-backed password-hashing upgrade when package installation and lockfile management are in place.
 
-Sessions are stored in memory by the running web process for this phase. This is enough to require server-side validation on protected routes and revoke access on logout, while leaving durable session records, rotation policy, timeout policy, and hardened cookie behavior to the dedicated server-side session phase.
+Session records are stored in SQLite as SHA-256 hashes of high-entropy random cookie tokens. The raw token is only returned to the browser in the `swd_session` cookie and is not stored server-side. The cookie is `HttpOnly`, `SameSite=Strict`, and scoped to `/`; the `Secure` attribute remains off for localhost HTTP and should be enabled only when HTTPS or reviewed shared-mode deployment support exists.
 
 ### Standard library web layer for phase 1
 

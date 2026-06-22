@@ -35,6 +35,7 @@ def page(title: str, body: str, *, flash: str = "", error: str = "") -> bytes:
       <a href="/runs">Runs</a>
       <a href="/findings">Findings</a>
       <a href="/assets">Assets</a>
+      <a href="/connectors">Connectors</a>
     </nav>
   </header>
   <main class="shell">

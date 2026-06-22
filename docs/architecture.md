@@ -5,8 +5,8 @@ SecurityWatchDaily is split into small modules so collection, matching, storage,
 ## Components
 
 - `collectors/`: source-specific fetch and parse logic.
-- `services/`: run orchestration, matching, trace suppression, validation support, and import flow.
-- `repositories/`: SQLite persistence for platforms, sources, runs, findings, and trace items.
+- `services/`: run orchestration, matching, trace suppression, validation support, CSV import, and connector sync flow.
+- `repositories/`: SQLite persistence for platforms, sources, runs, findings, trace items, assets, and connector state.
 - `web/`: local HTTP server, HTML rendering, and CSS.
 - `cli.py`: local commands for setup, scheduled runs, and serving the UI.
 
@@ -18,12 +18,15 @@ SecurityWatchDaily is split into small modules so collection, matching, storage,
 4. Findings are deduplicated by key.
 5. Trace state suppresses unchanged findings.
 6. Runs and findings are saved for local review.
-7. Finding products and asset matches are refreshed from the saved run data.
-8. The web UI reads the same database as the CLI.
+7. CSV imports and connector syncs map inventory into `assets` and `asset_components`.
+8. Finding products and asset matches are refreshed from the saved run data and current inventory.
+9. The web UI reads the same database as the CLI.
 
 ## Trust Boundary
 
-External source content and imported CSV inventory content are untrusted. They are parsed into structured records, validated at import boundaries, stored with parameterized SQLite statements, and escaped before browser rendering.
+External source content, connector inventory content, and imported CSV inventory content are untrusted. They are parsed into structured records, validated at import boundaries, stored with parameterized SQLite statements, and escaped before browser rendering.
+
+Connector credentials are secrets. They are read from local environment variables or future local-only secret handling, not stored in SQLite connector settings, committed files, sync runs, import errors, or browser-rendered pages.
 
 The first version is local-only and has no authentication. Do not expose it directly to a network until auth, authorization, CSRF protection, deployment settings, and logging rules are reviewed under the Strict profile.
 
@@ -88,11 +91,17 @@ Connectors should map external inventory into the same internal asset/component 
 
 Connector credentials must not be stored in tracked files. Use environment variables or a local secret store and keep connector settings separate from secrets.
 
+The current connector catalog stores connector metadata and non-secret settings in `connectors`, sync attempts in `connector_sync_runs`, per-record validation failures in `connector_import_errors`, and external-ID-to-asset links in `connector_asset_mappings`.
+
+The first working connector is `Sample Inventory`, a deterministic local fixture used to prove the framework, UI, health model, import mapping, and match refresh flow without external credentials. Freshservice, Jamf, and Intune are present as read-only shells with setup validation and clear errors until tenant-specific endpoint and auth work is completed.
+
 ### Read-only connector posture
 
 Inventory connectors should be read-only by default. Their job is to pull asset and software/hardware state into SecurityWatchDaily, not to mutate source-of-truth systems.
 
 Connector errors should be actionable. Permission problems, missing modules, tenant-specific endpoint differences, and network failures should be reported distinctly.
+
+Connector sync failures update connector health and sync-run state but do not block vulnerability collection or CSV import. CSV remains the primary fallback and troubleshooting path.
 
 ### Version-aware matching with confidence
 

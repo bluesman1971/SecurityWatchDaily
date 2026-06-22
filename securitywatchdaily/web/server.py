@@ -22,10 +22,18 @@ from securitywatchdaily.repositories.assets import (
     list_matches_for_asset,
     list_matches_for_finding,
 )
+from securitywatchdaily.repositories.connectors import (
+    get_connector,
+    list_connectors,
+    list_import_errors,
+    list_sync_runs,
+    set_connector_enabled,
+)
 from securitywatchdaily.repositories.runs import get_finding, latest_run, list_findings, list_runs
 from securitywatchdaily.repositories.sources import list_sources, save_source, set_source_enabled
 from securitywatchdaily.services.asset_import_service import csv_template, import_inventory_csv
 from securitywatchdaily.services.asset_matching_service import refresh_asset_matches_for_run
+from securitywatchdaily.services.connector_service import seed_connector_catalog, sync_connector, test_connector
 from securitywatchdaily.services.import_service import seed_defaults
 from securitywatchdaily.services.run_service import run_watch
 from securitywatchdaily.validation import split_csv
@@ -45,6 +53,7 @@ class AppContext:
         conn = connect(self.db_path)
         try:
             initialize(conn)
+            seed_connector_catalog(conn)
             yield conn
         finally:
             conn.close()
@@ -72,9 +81,13 @@ class SecurityWatchHandler(BaseHTTPRequestHandler):
                 "/findings": self.findings,
                 "/assets": self.assets,
                 "/assets/import": self.asset_import_form,
+                "/connectors": self.connectors,
                 "/api/health": self.health,
             }
             handler = routes.get(parsed.path)
+            if not handler and parsed.path.startswith("/connectors/"):
+                self.connector_detail(parsed.path)
+                return
             if not handler and parsed.path.startswith("/assets/"):
                 self.asset_detail(parsed.path)
                 return
@@ -108,6 +121,12 @@ class SecurityWatchHandler(BaseHTTPRequestHandler):
                 self.run_now(offline_sample=True)
             elif parsed.path == "/assets/import":
                 self.import_assets(form)
+            elif parsed.path == "/connectors/toggle":
+                self.toggle_connector(form)
+            elif parsed.path == "/connectors/test":
+                self.test_connector_action(form)
+            elif parsed.path == "/connectors/sync":
+                self.sync_connector_action(form)
             else:
                 self.redirect("/")
         except AppError as exc:
@@ -310,10 +329,78 @@ class SecurityWatchHandler(BaseHTTPRequestHandler):
             for asset in assets
         )
         body = f"""
-        <section class="hero"><div><h1>Assets</h1><p class="muted">CSV-backed inventory used for local impact matching.</p></div><a class="button" href="/assets/import">Import CSV</a></section>
+        <section class="hero"><div><h1>Assets</h1><p class="muted">CSV-backed inventory and read-only connector imports used for local impact matching.</p></div><a class="button" href="/assets/import">Import CSV</a></section>
         <section class="panel"><div class="table-wrap"><table><thead><tr><th>Asset</th><th>Type</th><th>Location</th><th>Platform</th><th>Components</th><th>Last seen</th></tr></thead><tbody>{rows or "<tr><td colspan='6'>No assets imported yet.</td></tr>"}</tbody></table></div></section>
         """
         self.respond(page("Assets", body))
+
+    def connectors(self) -> None:
+        with self.context.connection() as conn:
+            connectors = list_connectors(conn)
+        rows = "".join(
+            f"""
+            <tr>
+              <td><b><a href="/connectors/{esc(connector.id)}">{esc(connector.name)}</a></b><br><span class="muted">{esc(connector.description)}</span></td>
+              <td>{esc(connector.connector_type)}</td>
+              <td>{'Enabled' if connector.enabled else 'Disabled'}</td>
+              <td>{esc(connector.last_successful_sync or 'Never')}</td>
+              <td>{esc(connector.last_error or '')}</td>
+              <td>{connector.imported_asset_count} / {connector.imported_component_count}</td>
+            </tr>
+            """
+            for connector in connectors
+        )
+        body = f"""
+        <section class="hero">
+          <div><h1>Connector Catalog</h1><p class="muted">Read-only source-of-truth inventory connectors. CSV import remains the fallback workflow.</p></div>
+          <a class="button secondary" href="/assets/import">Import CSV</a>
+        </section>
+        <section class="panel"><div class="table-wrap"><table><thead><tr><th>Connector</th><th>Type</th><th>Status</th><th>Last success</th><th>Last error</th><th>Assets / components</th></tr></thead><tbody>{rows}</tbody></table></div></section>
+        """
+        self.respond(page("Connector Catalog", body))
+
+    def connector_detail(self, path: str, *, flash: str = "", error: str = "") -> None:
+        connector_id = path.removeprefix("/connectors/").strip("/")
+        with self.context.connection() as conn:
+            connector = get_connector(conn, connector_id)
+            if not connector:
+                self.respond(page("Not found", "<section class='panel'><h1>Connector not found</h1></section>"), HTTPStatus.NOT_FOUND)
+                return
+            runs = list_sync_runs(conn, connector_id)
+            latest_errors = list_import_errors(conn, int(runs[0]["id"])) if runs else []
+        run_rows = "".join(
+            f"<tr><td>{esc(row['started_at'])}</td><td>{badge(row['status'])}</td><td>{esc(row['action'])}</td><td>{row['imported_asset_count']} / {row['imported_component_count']}</td><td>{esc(row['error'])}</td></tr>"
+            for row in runs
+        )
+        error_rows = "".join(
+            f"<tr><td>{esc(row['external_id'])}</td><td>{esc(row['field'])}</td><td>{esc(row['message'])}</td></tr>"
+            for row in latest_errors
+        )
+        body = f"""
+        <section class="hero">
+          <div><h1>{esc(connector.name)}</h1><p class="muted">{esc(connector.description)}</p></div>
+          <a class="button secondary" href="/connectors">Back to catalog</a>
+        </section>
+        <section class="panel metrics">
+          <div class="metric"><b>{'Enabled' if connector.enabled else 'Disabled'}</b><span>Status</span></div>
+          <div class="metric"><b>{esc(connector.last_successful_sync or 'Never')}</b><span>Last success</span></div>
+          <div class="metric"><b>{esc(connector.last_failed_sync or 'Never')}</b><span>Last failure</span></div>
+          <div class="metric"><b>{connector.imported_asset_count} / {connector.imported_component_count}</b><span>Assets / components</span></div>
+        </section>
+        <section class="panel">
+          <h2>Actions</h2>
+          <div class="actions">
+            <form method="post" action="/connectors/toggle"><input type="hidden" name="id" value="{esc(connector.id)}"><input type="hidden" name="enabled" value="{'0' if connector.enabled else '1'}"><button class="secondary">{'Disable' if connector.enabled else 'Enable'}</button></form>
+            <form method="post" action="/connectors/test"><input type="hidden" name="id" value="{esc(connector.id)}"><button class="secondary">Test connector</button></form>
+            <form method="post" action="/connectors/sync"><input type="hidden" name="id" value="{esc(connector.id)}"><button>Sync now</button></form>
+          </div>
+          <p class="muted">Credentials are read from local environment variables and are not stored or shown here.</p>
+          <pre class="code">{esc(connector.settings_json)}</pre>
+        </section>
+        <section class="panel"><h2>Recent sync runs</h2><div class="table-wrap"><table><thead><tr><th>Started</th><th>Status</th><th>Action</th><th>Assets / components</th><th>Error</th></tr></thead><tbody>{run_rows or "<tr><td colspan='5'>No sync runs yet.</td></tr>"}</tbody></table></div></section>
+        <section class="panel"><h2>Latest import errors</h2><div class="table-wrap"><table><thead><tr><th>External ID</th><th>Field</th><th>Issue</th></tr></thead><tbody>{error_rows or "<tr><td colspan='3'>No import errors for the latest run.</td></tr>"}</tbody></table></div></section>
+        """
+        self.respond(page(connector.name, body, flash=flash, error=error))
 
     def asset_import_form(self) -> None:
         body = f"""
@@ -448,6 +535,36 @@ class SecurityWatchHandler(BaseHTTPRequestHandler):
         <section class="hero"><div><h1>Import complete</h1><p class="muted">{result.assets_imported} assets and {result.components_imported} components imported. {match_count} impact matches refreshed.</p></div><a class="button" href="/assets">View assets</a></section>
         """
         self.respond(page("Import complete", body))
+
+    def toggle_connector(self, form: dict[str, str]) -> None:
+        connector_id = form.get("id", "").strip()
+        with self.context.connection() as conn:
+            set_connector_enabled(conn, connector_id, form.get("enabled") == "1")
+        self.redirect(f"/connectors/{connector_id}")
+
+    def test_connector_action(self, form: dict[str, str]) -> None:
+        connector_id = form.get("id", "").strip()
+        with self.context.connection() as conn:
+            result = test_connector(conn, connector_id)
+        if result.success:
+            self.connector_detail(f"/connectors/{connector_id}", flash=result.message)
+        else:
+            self.connector_detail(f"/connectors/{connector_id}", error=result.message)
+
+    def sync_connector_action(self, form: dict[str, str]) -> None:
+        connector_id = form.get("id", "").strip()
+        with self.context.connection() as conn:
+            result = sync_connector(conn, connector_id)
+        if result.success:
+            self.connector_detail(
+                f"/connectors/{connector_id}",
+                flash=(
+                    f"{result.imported_asset_count} assets and {result.imported_component_count} components imported. "
+                    f"{result.match_count} impact matches refreshed."
+                ),
+            )
+        else:
+            self.connector_detail(f"/connectors/{connector_id}", error=result.message)
 
 
 def serve(host: str = "127.0.0.1", port: int = 8765, db_path: Path | None = None) -> ThreadingHTTPServer:

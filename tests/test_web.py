@@ -82,6 +82,48 @@ class WebTests(unittest.TestCase):
         self.assertIn("Impacted assets", finding)
         self.assertIn("laptop-1", finding)
 
+    def test_connector_catalog_detail_and_sample_sync_render(self):
+        status, catalog = self.request("GET", "/connectors")
+        self.assertEqual(status, 200)
+        self.assertIn("Connector Catalog", catalog)
+        self.assertIn("Sample Inventory", catalog)
+
+        status, detail = self.request("GET", "/connectors/sample_inventory")
+        self.assertEqual(status, 200)
+        self.assertIn("Credentials are read from local environment variables", detail)
+
+        body = "id=sample_inventory&enabled=1"
+        status, _ = self.request(
+            "POST",
+            "/connectors/toggle",
+            body=body,
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+        self.assertEqual(status, 303)
+
+        status, test_result = self.request(
+            "POST",
+            "/connectors/test",
+            body="id=sample_inventory",
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+        self.assertEqual(status, 200)
+        self.assertIn("Sample connector is ready", test_result)
+
+        status, _ = self.request("POST", "/run-sample", body="", headers={"Content-Type": "application/x-www-form-urlencoded"})
+        self.assertEqual(status, 303)
+        status, sync_result = self.request(
+            "POST",
+            "/connectors/sync",
+            body="id=sample_inventory",
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+        self.assertEqual(status, 200)
+        self.assertIn("2 assets and 3 components imported", sync_result)
+        status, assets = self.request("GET", "/assets")
+        self.assertEqual(status, 200)
+        self.assertIn("connector-laptop-1", assets)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -69,6 +69,7 @@ Intune connector notes:
 ## Troubleshooting
 
 - If a source fails, check the dashboard source status. Other sources should still complete.
+- Source URLs and connector setup-test URLs must use public HTTPS endpoints. Fetches that resolve to localhost, private networks, link-local ranges, multicast ranges, IPv6 unique-local/link-local ranges, or metadata services are blocked before connecting. Redirects are not followed; use the final HTTPS feed URL directly.
 - If a connector fails, check its detail page for last failure, sync-run errors, and per-record import errors. Vulnerability collection and CSV import should still work.
 - If a platform produces noisy matches, add exclude keywords and use more specific phrases.
 - If the database cannot be opened, check write permissions in the project folder.

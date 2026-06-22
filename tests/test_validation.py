@@ -14,6 +14,8 @@ class ValidationTests(unittest.TestCase):
         validate_source(Source(id="msrc", name="MSRC", source_type="msrc", url=""))
         with self.assertRaises(ConfigValidationError):
             validate_source(Source(id="bad_source", name="Bad", source_type="cisa", url="not-url"))
+        with self.assertRaises(ConfigValidationError):
+            validate_source(Source(id="http_source", name="HTTP", source_type="cisa", url="http://example.com/feed.json"))
 
 
 if __name__ == "__main__":

@@ -8,11 +8,11 @@ import os
 import re
 import sqlite3
 import urllib.error
-import urllib.request
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from urllib.parse import urljoin, urlparse
 
+from securitywatchdaily.collectors.http import open_external_url
 from securitywatchdaily.errors import AppError, ConfigValidationError
 from securitywatchdaily.models import (
     Asset,
@@ -495,13 +495,14 @@ def maybe_test_freshservice_endpoint() -> None:
     url = urljoin(tenant_url, test_path.lstrip("/"))
     api_key = os.environ["FRESHSERVICE_API_KEY"].strip()
     token = base64.b64encode(f"{api_key}:X".encode("utf-8")).decode("ascii")
-    request = urllib.request.Request(
-        url,
-        headers={"Authorization": f"Basic {token}", "User-Agent": "SecurityWatchDaily/0.1"},
-    )
     try:
-        with urllib.request.urlopen(request, timeout=20) as response:
+        with open_external_url(url, timeout=20, headers={"Authorization": f"Basic {token}"}) as response:
             response.read(1024)
+    except AppError as exc:
+        raise ConfigValidationError(
+            "Freshservice endpoint could not be reached.",
+            detail=exc.detail or "Check the base URL and local network access.",
+        ) from exc
     except urllib.error.HTTPError as exc:
         if exc.code == 403:
             raise ConfigValidationError(

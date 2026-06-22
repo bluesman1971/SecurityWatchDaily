@@ -947,8 +947,8 @@ def _validate_bind_mode(host: str, *, shared: bool) -> None:
         raise AppError(
             "Shared mode is not available yet.",
             detail=(
-                "Refusing to start with --shared until SSRF protections, response limits, safe error handling, "
-                "browser security headers, audit events, and HTTPS or reverse-proxy deployment settings are implemented."
+                "Refusing to start with --shared until response limits, safe error handling, browser security headers, "
+                "audit events, and HTTPS or reverse-proxy deployment settings are implemented."
             ),
         )
     if not _is_loopback_bind_host(host):

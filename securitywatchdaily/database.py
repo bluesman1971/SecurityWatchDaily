@@ -9,7 +9,7 @@ from pathlib import Path
 from .errors import StorageError
 
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 
 def connect(db_path: Path) -> sqlite3.Connection:
@@ -229,6 +229,16 @@ def initialize(conn: sqlite3.Connection) -> None:
               UNIQUE(connector_id, external_id)
             );
             CREATE INDEX IF NOT EXISTS idx_connector_asset_mappings_asset_id ON connector_asset_mappings(asset_id);
+            CREATE TABLE IF NOT EXISTS audit_events (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              timestamp TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              action TEXT NOT NULL,
+              username TEXT NOT NULL DEFAULT '',
+              result TEXT NOT NULL,
+              context_json TEXT NOT NULL DEFAULT '{}'
+            );
+            CREATE INDEX IF NOT EXISTS idx_audit_events_timestamp ON audit_events(timestamp);
+            CREATE INDEX IF NOT EXISTS idx_audit_events_action ON audit_events(action);
             CREATE TABLE IF NOT EXISTS trace_items (
               key TEXT PRIMARY KEY,
               first_seen TEXT NOT NULL,

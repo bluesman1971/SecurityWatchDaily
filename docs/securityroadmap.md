@@ -279,6 +279,10 @@ Tests:
 
 ## Phase 10: Audit Logging
 
+Status: implemented. The web UI writes local SQLite audit events for authentication, admin-user changes, platform and
+source changes, asset imports, connector actions, and run triggers. Audit context intentionally excludes passwords,
+session IDs, CSRF tokens, API keys, bearer tokens, client secrets, and connector credential values.
+
 Goal: give operators a local trail of security-sensitive actions without collecting secrets.
 
 Implementation:

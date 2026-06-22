@@ -29,6 +29,7 @@ from securitywatchdaily.config import database_path, legacy_watchlist_path
 from securitywatchdaily.database import connect, initialize
 from securitywatchdaily.errors import AppError
 from securitywatchdaily.models import Platform, Source
+from securitywatchdaily.repositories.audit import add_audit_event
 from securitywatchdaily.repositories.platforms import list_platforms, save_platform, set_platform_enabled
 from securitywatchdaily.repositories.assets import (
     get_asset,
@@ -176,7 +177,7 @@ class SecurityWatchHandler(BaseHTTPRequestHandler):
                 self.forbidden()
                 return
             if parsed.path == "/logout":
-                self.logout_action()
+                self.logout_action(current_user)
                 return
             if parsed.path == "/platforms":
                 self.create_platform(form)
@@ -307,6 +308,19 @@ class SecurityWatchHandler(BaseHTTPRequestHandler):
         details = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
         print(_redact_error_details(details), file=sys.stderr)
 
+    def _audit(self, action: str, result: str, *, username: str = "", context: dict[str, object] | None = None) -> None:
+        safe_context: dict[str, object] = {
+            "method": self.command,
+            "path": urlparse(self.path).path,
+            "remote_addr": self.client_address[0],
+        }
+        safe_context.update(context or {})
+        with self.context.connection() as conn:
+            add_audit_event(conn, action=action, username=username, result=result, context=safe_context)
+
+    def _audit_user(self, action: str, result: str, current_user: object, *, context: dict[str, object] | None = None) -> None:
+        self._audit(action, result, username=str(current_user["username"]), context=context)
+
     def parse_multipart(self, raw: bytes, content_type: str) -> dict[str, str]:
         boundary_match = re.search(r"boundary=(?P<boundary>[^;]+)", content_type)
         if not boundary_match:
@@ -427,17 +441,20 @@ class SecurityWatchHandler(BaseHTTPRequestHandler):
         with self.context.connection() as conn:
             user = authenticate_user(conn, username, password)
         if not user:
+            self._audit("login.failure", "failure", username=username.strip())
             self.login_form(error="Invalid username or password.")
             return
         with self.context.connection() as conn:
             token = create_session(conn, int(user["id"]))
+        self._audit("login.success", "success", username=str(user["username"]))
         self.redirect(next_path, headers={"Set-Cookie": self._session_cookie_header(token)})
 
-    def logout_action(self) -> None:
+    def logout_action(self, current_user: object) -> None:
         token = self._session_cookie()
         if token:
             with self.context.connection() as conn:
                 destroy_session(conn, token)
+        self._audit_user("logout", "success", current_user)
         self.redirect("/login", headers={"Set-Cookie": self._clear_session_cookie_header()})
 
     def _session_cookie_header(self, token: str) -> str:
@@ -506,6 +523,9 @@ class SecurityWatchHandler(BaseHTTPRequestHandler):
             return
         with self.context.connection() as conn:
             user = create_admin_user(conn, form.get("username", ""), password)
+        current = self.current_user()
+        if current:
+            self._audit_user("admin_user.create", "success", current, context={"target_username": user["username"]})
         self.admin_users(flash=f"Admin user '{user['username']}' created.")
 
     def delete_admin_user_action(self, form: dict[str, str], current_user: object) -> None:
@@ -515,6 +535,7 @@ class SecurityWatchHandler(BaseHTTPRequestHandler):
             raise AppError("Admin user could not be deleted.", detail="The requested admin user was invalid.") from exc
         with self.context.connection() as conn:
             delete_admin_user(conn, user_id, current_user_id=int(current_user["id"]))
+        self._audit_user("admin_user.delete", "success", current_user, context={"target_user_id": user_id})
         self.admin_users(flash="Admin user deleted.")
 
     def dashboard(self) -> None:
@@ -888,11 +909,19 @@ class SecurityWatchHandler(BaseHTTPRequestHandler):
         )
         with self.context.connection() as conn:
             save_platform(conn, platform, allow_update=False)
+        current = self.current_user()
+        if current:
+            self._audit_user("platform.create", "success", current, context={"platform_id": platform.id})
         self.redirect("/platforms")
 
     def toggle_platform(self, form: dict[str, str]) -> None:
+        platform_id = form["id"]
+        enabled = form.get("enabled") == "1"
         with self.context.connection() as conn:
-            set_platform_enabled(conn, form["id"], form.get("enabled") == "1")
+            set_platform_enabled(conn, platform_id, enabled)
+        current = self.current_user()
+        if current:
+            self._audit_user("platform.toggle", "success", current, context={"platform_id": platform_id, "enabled": enabled})
         self.redirect("/platforms")
 
     def create_source(self, form: dict[str, str]) -> None:
@@ -906,17 +935,29 @@ class SecurityWatchHandler(BaseHTTPRequestHandler):
         )
         with self.context.connection() as conn:
             save_source(conn, source, allow_update=False)
+        current = self.current_user()
+        if current:
+            self._audit_user("source.create", "success", current, context={"source_id": source.id, "source_type": source.source_type})
         self.redirect("/sources")
 
     def toggle_source(self, form: dict[str, str]) -> None:
+        source_id = form["id"]
+        enabled = form.get("enabled") == "1"
         with self.context.connection() as conn:
-            set_source_enabled(conn, form["id"], form.get("enabled") == "1")
+            set_source_enabled(conn, source_id, enabled)
+        current = self.current_user()
+        if current:
+            self._audit_user("source.toggle", "success", current, context={"source_id": source_id, "enabled": enabled})
         self.redirect("/sources")
 
     def run_now(self, *, offline_sample: bool) -> None:
         with self.context.connection() as conn:
             seed_defaults(conn, legacy_watchlist_path(self.context.db_path.parent))
             run_watch(conn, offline_sample=offline_sample, force_visible=offline_sample)
+        current = self.current_user()
+        if current:
+            action = "run.sample" if offline_sample else "run.live"
+            self._audit_user(action, "success", current)
         self.redirect("/")
 
     def import_assets(self, form: dict[str, str]) -> None:
@@ -935,7 +976,22 @@ class SecurityWatchHandler(BaseHTTPRequestHandler):
             <section class="panel"><div class="table-wrap"><table><thead><tr><th>Row</th><th>Field</th><th>Issue</th></tr></thead><tbody>{rows}</tbody></table></div></section>
             """
             self.respond(page("Import errors", body), HTTPStatus.BAD_REQUEST)
+            current = self.current_user()
+            if current:
+                self._audit_user("asset_import", "failure", current, context={"error_count": len(result.errors)})
             return
+        current = self.current_user()
+        if current:
+            self._audit_user(
+                "asset_import",
+                "success",
+                current,
+                context={
+                    "assets_imported": result.assets_imported,
+                    "components_imported": result.components_imported,
+                    "matches_refreshed": match_count,
+                },
+            )
         body = f"""
         <section class="hero"><div><h1>Import complete</h1><p class="muted">{result.assets_imported} assets and {result.components_imported} components imported. {match_count} impact matches refreshed.</p></div><a class="button" href="/assets">View assets</a></section>
         """
@@ -943,14 +999,26 @@ class SecurityWatchHandler(BaseHTTPRequestHandler):
 
     def toggle_connector(self, form: dict[str, str]) -> None:
         connector_id = form.get("id", "").strip()
+        enabled = form.get("enabled") == "1"
         with self.context.connection() as conn:
-            set_connector_enabled(conn, connector_id, form.get("enabled") == "1")
+            set_connector_enabled(conn, connector_id, enabled)
+        current = self.current_user()
+        if current:
+            self._audit_user("connector.toggle", "success", current, context={"connector_id": connector_id, "enabled": enabled})
         self.redirect(f"/connectors/{connector_id}")
 
     def test_connector_action(self, form: dict[str, str]) -> None:
         connector_id = form.get("id", "").strip()
         with self.context.connection() as conn:
             result = test_connector(conn, connector_id)
+        current = self.current_user()
+        if current:
+            self._audit_user(
+                "connector.test",
+                "success" if result.success else "failure",
+                current,
+                context={"connector_id": connector_id},
+            )
         if result.success:
             self.connector_detail(f"/connectors/{connector_id}", flash=result.message)
         else:
@@ -960,6 +1028,19 @@ class SecurityWatchHandler(BaseHTTPRequestHandler):
         connector_id = form.get("id", "").strip()
         with self.context.connection() as conn:
             result = sync_connector(conn, connector_id)
+        current = self.current_user()
+        if current:
+            self._audit_user(
+                "connector.sync",
+                "success" if result.success else "failure",
+                current,
+                context={
+                    "connector_id": connector_id,
+                    "assets_imported": result.imported_asset_count,
+                    "components_imported": result.imported_component_count,
+                    "matches_refreshed": result.match_count,
+                },
+            )
         if result.success:
             self.connector_detail(
                 f"/connectors/{connector_id}",
@@ -974,6 +1055,9 @@ class SecurityWatchHandler(BaseHTTPRequestHandler):
     def save_intune_connector_settings(self, form: dict[str, str]) -> None:
         with self.context.connection() as conn:
             save_intune_settings(conn, form)
+        current = self.current_user()
+        if current:
+            self._audit_user("connector.settings", "success", current, context={"connector_id": "intune"})
         self.intune_setup_form(flash="Intune connector settings saved. Set the local secret env var before testing.")
 
 
@@ -1002,8 +1086,7 @@ def _validate_bind_mode(host: str, *, shared: bool) -> None:
         raise AppError(
             "Shared mode is not available yet.",
             detail=(
-                "Refusing to start with --shared until audit events and HTTPS or reverse-proxy deployment settings "
-                "are implemented."
+                "Refusing to start with --shared until HTTPS or reverse-proxy deployment settings are implemented."
             ),
         )
     if not _is_loopback_bind_host(host):

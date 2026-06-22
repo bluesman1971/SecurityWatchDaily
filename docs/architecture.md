@@ -39,7 +39,9 @@ Browser-facing HTML responses include a strict same-origin content security poli
 
 CSV asset imports are bounded by request size and row count, validate asset fields before storage, and reject malformed or repeated multipart form fields. Uploaded filenames are ignored and are not used for storage paths or database values.
 
-Do not expose the app directly to a network until deployment settings and logging rules are reviewed under the Strict profile.
+Security-sensitive web actions write local SQLite audit events with timestamp, action, username, result, and safe request context. Audit context excludes passwords, password hashes, session IDs, CSRF tokens, API keys, bearer tokens, client secrets, and connector credential values.
+
+Do not expose the app directly to a network until secure deployment settings are reviewed under the Strict profile.
 
 ## Architectural Decisions
 

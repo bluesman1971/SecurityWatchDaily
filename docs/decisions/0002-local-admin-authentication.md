@@ -30,6 +30,8 @@ Phase 4 update: generate one CSRF token per authenticated session and store it w
 
 Admin-management update: keep the single `admin` role, but allow authenticated admins to add and delete other local admin users from `/admin/users`. Deleting a user removes that user's active sessions. The web UI prevents deleting the currently authenticated account so an operator cannot accidentally remove their own active access.
 
+Phase 10 update: write local SQLite audit events for authentication, admin-user changes, platform and source changes, asset imports, connector actions, and run triggers. Audit events include timestamp, action, username, result, and safe request context. They exclude passwords, password hashes, session IDs, CSRF tokens, API keys, bearer tokens, client secrets, and connector credential values.
+
 Keep shared mode disabled until later roadmap controls are complete.
 
 ## Options Considered
@@ -58,4 +60,5 @@ The CSRF token is separate from the session cookie token. The session cookie tok
 - Admin user deletion invalidates that user's active sessions.
 - Password hashing should be revisited when dependency and lockfile management are in place, with Argon2id as the preferred upgrade path.
 - Authenticated POSTs without a same-origin local `Origin` header and valid CSRF token now fail with `403`.
+- Security-sensitive web actions now leave a local audit trail without storing authentication tokens or connector secrets.
 - Shared mode remains unavailable until later roadmap prerequisites and secure deployment settings are complete.

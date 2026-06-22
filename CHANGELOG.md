@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### Security
+
+- Hardened the Ubuntu RSS collector against XML entity-expansion ("billion laughs") denial-of-service by rejecting feeds that declare a DTD/`DOCTYPE` before parsing. Kept dependency-free (no `defusedxml`) to preserve the standard-library-only runtime posture. Covered by `tests/test_collectors_ubuntu.py`.
+- Equalized login timing for unknown usernames by verifying against a constant decoy password hash, preventing user enumeration through a timing side channel.
+- Extended Dependabot to monitor the `pip` ecosystem in addition to GitHub Actions.
+
 ## 0.1.0 - 2026-06-22
 
 ### Added

@@ -53,6 +53,19 @@ def verify_password(password: str, password_hash: str) -> bool:
     return hmac.compare_digest(actual, expected)
 
 
+# Decoy hash used to equalize authentication timing when a username does not
+# exist. Computed once on first use with the same scheme/iterations as real
+# password hashes so the decoy verification cost matches a real one.
+_DECOY_PASSWORD_HASH: str | None = None
+
+
+def _decoy_password_hash() -> str:
+    global _DECOY_PASSWORD_HASH
+    if _DECOY_PASSWORD_HASH is None:
+        _DECOY_PASSWORD_HASH = hash_password("decoy-password-not-a-real-credential")
+    return _DECOY_PASSWORD_HASH
+
+
 def create_admin_user(conn: sqlite3.Connection, username: str, password: str) -> sqlite3.Row:
     username = _validate_username(username)
     password_hash = hash_password(password)
@@ -110,6 +123,10 @@ def delete_admin_user(conn: sqlite3.Connection, user_id: int, *, current_user_id
 def authenticate_user(conn: sqlite3.Connection, username: str, password: str) -> sqlite3.Row | None:
     row = get_user_by_username(conn, username.strip())
     if row is None or row["role"] != ADMIN_ROLE:
+        # Run a verification against a constant decoy hash so the response time
+        # for an unknown/non-admin username matches that of a wrong password.
+        # This avoids leaking valid usernames through a timing side channel.
+        verify_password(password, _decoy_password_hash())
         return None
     if not verify_password(password, row["password_hash"]):
         return None

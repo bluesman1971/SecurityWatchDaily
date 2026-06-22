@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import ipaddress
 import re
 from contextlib import contextmanager
 from http import HTTPStatus
@@ -663,7 +664,43 @@ class SecurityWatchHandler(BaseHTTPRequestHandler):
         self.intune_setup_form(flash="Intune connector settings saved. Set the local secret env var before testing.")
 
 
-def serve(host: str = "127.0.0.1", port: int = 8765, db_path: Path | None = None) -> ThreadingHTTPServer:
+def _is_loopback_bind_host(host: str) -> bool:
+    normalized = host.strip().strip("[]").lower()
+    if normalized == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(normalized).is_loopback
+    except ValueError:
+        return False
+
+
+def _validate_bind_mode(host: str, *, shared: bool) -> None:
+    if shared:
+        raise AppError(
+            "Shared mode is not available yet.",
+            detail=(
+                "Refusing to start with --shared until real authentication and HTTPS or reverse-proxy "
+                "deployment settings are implemented."
+            ),
+        )
+    if not _is_loopback_bind_host(host):
+        raise AppError(
+            "Refusing to bind the local web UI to a non-loopback address.",
+            detail=(
+                "Use the default 127.0.0.1 host for local mode. "
+                "Shared mode is blocked until authentication is implemented."
+            ),
+        )
+
+
+def serve(
+    host: str = "127.0.0.1",
+    port: int = 8765,
+    db_path: Path | None = None,
+    *,
+    shared: bool = False,
+) -> ThreadingHTTPServer:
+    _validate_bind_mode(host, shared=shared)
     context = AppContext(db_path or database_path())
     with context.connection() as conn:
         seed_defaults(conn, legacy_watchlist_path(context.db_path.parent))

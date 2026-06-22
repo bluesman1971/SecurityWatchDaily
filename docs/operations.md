@@ -68,3 +68,6 @@ Intune connector notes:
 - Keep source URLs public unless secret handling has been designed.
 - Do not commit generated databases, connector logs, imported asset data, customer exports, or trace/run output.
 - Keep the server bound to `127.0.0.1` for local use.
+- Non-loopback hosts such as `0.0.0.0`, `::`, or LAN addresses are rejected in local mode. The `--shared`
+  flag exists as an explicit future shared-mode request, but startup fails closed until authentication and secure
+  deployment settings are implemented.

@@ -30,6 +30,11 @@ def build_parser() -> argparse.ArgumentParser:
     serve_parser = sub.add_parser("serve", help="Start the local web UI.")
     serve_parser.add_argument("--host", default="127.0.0.1")
     serve_parser.add_argument("--port", type=int, default=8765)
+    serve_parser.add_argument(
+        "--shared",
+        action="store_true",
+        help="Request shared network mode. Requires authentication support.",
+    )
     sub.add_parser("summary", help="Print a JSON summary of the current local state.")
     return parser
 
@@ -39,7 +44,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         if args.command == "serve":
-            server = serve(args.host, args.port, args.db)
+            server = serve(args.host, args.port, args.db, shared=args.shared)
             print(f"SecurityWatchDaily is running at http://{args.host}:{args.port}")
             server.serve_forever()
             return 0

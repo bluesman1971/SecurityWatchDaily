@@ -27,7 +27,7 @@ def page(title: str, body: str, *, flash: str = "", error: str = "") -> bytes:
 </head>
 <body>
   <header class="topbar">
-    <a class="brand" href="/"><span class="mark">S</span><span>SecurityWatchDaily</span></a>
+    <a class="brand" href="/"><span class="mark">S</span><span>SecurityWatchDaily<span class="brand-dot">.</span></span></a>
     <nav>
       <a href="/">Dashboard</a>
       <a href="/platforms">Platforms</a>

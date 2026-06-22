@@ -13,4 +13,5 @@
 - Modular collectors and source-level error reporting.
 - Connector Catalog with read-only connector framework, sync health, import-error persistence, Sample Inventory sync, and Freshservice/Jamf/Intune connector shells.
 - Microsoft Intune setup UI for non-secret Graph tenant/client metadata, local environment variable names, and test-before-enable guidance.
+- Design-system aligned local web UI with paper/ink/red styling, sticky header, hairline rules, flatter panels, and pill actions.
 - Tests for matching, validation, normalization, CSV import, version handling, trace suppression, storage, and web flows.

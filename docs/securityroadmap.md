@@ -307,6 +307,10 @@ Tests:
 
 ## Documentation Work
 
+Status: implemented for the local security-hardening release. Shared-mode user setup remains intentionally
+undocumented as supported because `--shared` still fails closed until HTTPS or reverse-proxy deployment settings are
+designed and tested.
+
 Required docs:
 
 - Update `README.md` with shared-mode setup and warnings.

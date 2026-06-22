@@ -21,4 +21,10 @@
 ### Security
 
 - Added SQLite-backed admin users with salted password hashes. Plaintext passwords are not stored.
-- Kept shared mode disabled pending CSRF protection, hardened persistent sessions, and secure deployment settings.
+- Added SQLite-backed server-side sessions, CSRF-protected POST forms, same-origin Origin checks, and URL session-ID rejection.
+- Kept shared mode disabled by default and fail-closed for `--shared` until secure HTTPS or reverse-proxy deployment settings are designed.
+- Added SSRF-safe external HTTP fetches with blocked internal address ranges, redirect blocking, response-size caps, and request timeouts.
+- Added safe web error handling so unexpected failures do not render exception details, internal paths, credentialed URLs, or token-like values.
+- Added restrictive browser security headers on HTML responses.
+- Hardened CSV asset imports with row-count limits, consistent field-length limits, malformed multipart rejection, and repeated-field rejection.
+- Added local SQLite audit events for security-sensitive web actions without logging passwords, session tokens, CSRF tokens, API keys, bearer tokens, client secrets, or connector credential values.

@@ -12,7 +12,7 @@ It imports an optional `watchlist.json`, stores editable platforms and sources i
 - SQLite-backed configuration and run history.
 - SQLite-backed assets, asset components, product aliases, finding products, version ranges, materialized asset matches, connector status, sync runs, import errors, and connector asset mappings.
 - Source-level error handling so one broken feed does not stop the daily run.
-- Local admin authentication for the web UI with SQLite-backed server-side sessions, CSRF-protected POST forms, and same-origin POST checks. Passwords are stored only as salted password hashes, and raw session tokens are not stored in SQLite.
+- Local admin authentication for the web UI with SQLite-backed server-side sessions, CSRF-protected POST forms, same-origin POST checks, safe error pages, browser security headers, bounded imports, and local audit events. Passwords are stored only as salted password hashes, and raw session tokens are not stored in SQLite.
 - No cloud deployment in the first version.
 
 ## Run Locally
@@ -61,6 +61,8 @@ Notes:
 
 - `hostname` and `product` are required.
 - `last_seen` uses `YYYY-MM-DD` when provided.
+- Imports are limited to 2 MB and 10,000 data rows.
+- Asset import fields are limited to 255 characters.
 - One row represents one asset component. Re-importing a hostname replaces that asset's component list.
 - Product aliases normalize common variants such as `Windows 11 Pro`, `Microsoft Windows 11`, `PANOS`, and `PAN-OS`.
 - Impact confidence labels are `confirmed affected`, `likely affected`, `needs review`, `not affected`, and `unknown`.
@@ -121,11 +123,13 @@ gitleaks detect --source . --no-banner --redact
 ## Repository Standards
 
 - Local web binding defaults to `127.0.0.1`.
+- The explicit `--shared` flag exists for future shared-mode work, but currently fails closed.
 - User-editable platform and source inputs are validated before saving.
 - External source content, connector data, and imported CSV content are treated as untrusted and escaped before rendering.
+- Security-sensitive web actions are recorded as local SQLite audit events without passwords, session tokens, CSRF tokens, API keys, bearer tokens, client secrets, or connector credential values.
 - Generated databases, imported customer data, reports, connector logs, run logs, caches, and trace files are ignored.
-- Tests cover matching, validation, normalization, CSV import, connector status and sync flows, version handling, trace suppression, storage, authentication, sessions, CSRF and Origin checks, friendly source errors, and practical web flows.
+- Tests cover matching, validation, normalization, CSV import, upload hardening, connector status and sync flows, version handling, trace suppression, storage, authentication, sessions, CSRF and Origin checks, audit logging, friendly source errors, and practical web flows.
 
 ## Before Network Hosting
 
-Do not expose this app directly to a network without a Strict-profile review for remaining shared-mode prerequisites, including SSRF protections, response limits, safe error handling, browser security headers, upload hardening, audit logging, deployment settings, and source-secret handling.
+Do not expose this app directly to a network. Non-loopback binding without `--shared` is rejected, and `--shared` still fails closed until HTTPS or a reviewed reverse-proxy deployment mode is designed, documented, and tested under the Strict profile.

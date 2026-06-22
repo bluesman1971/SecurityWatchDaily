@@ -84,6 +84,7 @@ Intune connector notes:
 - Keep source URLs public unless secret handling has been designed.
 - Do not commit generated databases, connector logs, imported asset data, customer exports, or trace/run output.
 - Keep the server bound to `127.0.0.1` for local use.
+- There is no supported shared-mode deployment yet; `--shared` intentionally fails closed until HTTPS or reverse-proxy deployment settings are designed and tested.
 - The web UI requires a local admin login. Passwords and raw session tokens are never stored in plaintext.
 - Security-sensitive web actions are recorded in local SQLite audit events without passwords, session tokens, CSRF tokens, API keys, bearer tokens, client secrets, or connector credential values.
 - Manage additional local admin users from **Admin** after creating the first bootstrap account.

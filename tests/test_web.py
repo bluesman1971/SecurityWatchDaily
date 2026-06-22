@@ -48,8 +48,9 @@ class WebTests(unittest.TestCase):
             headers.setdefault("Cookie", self.cookie)
         if method == "POST" and self.cookie:
             headers.setdefault("Origin", self.origin())
-            headers.setdefault("Content-Type", "application/x-www-form-urlencoded")
-            body = self.with_csrf(body)
+            content_type = headers.setdefault("Content-Type", "application/x-www-form-urlencoded")
+            if not content_type.startswith("multipart/form-data"):
+                body = self.with_csrf(body)
         conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
         conn.request(method, path, body=body, headers=headers)
         response = conn.getresponse()
@@ -88,6 +89,13 @@ class WebTests(unittest.TestCase):
             return body
         separator = "&" if body else ""
         return f"{body}{separator}csrf_token={self.csrf_token}"
+
+    def multipart_body(self, boundary, parts):
+        chunks = []
+        for headers, value in parts:
+            chunks.append(f"--{boundary}\r\n{headers}\r\n\r\n{value}\r\n")
+        chunks.append(f"--{boundary}--\r\n")
+        return "".join(chunks).encode("utf-8")
 
     def test_dashboard_renders(self):
         status, data, _ = self.request("GET", "/")
@@ -222,6 +230,84 @@ class WebTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertIn("Impacted assets", finding)
         self.assertIn("laptop-1", finding)
+
+    def test_asset_import_empty_file_plus_pasted_csv_behaves_predictably(self):
+        boundary = "phase9-empty-file"
+        csv_text = "hostname,product\npasted-laptop,Windows 11\n"
+        body = self.multipart_body(
+            boundary,
+            [
+                ('Content-Disposition: form-data; name="csrf_token"', self.csrf_token),
+                ('Content-Disposition: form-data; name="csv_file"; filename="empty.csv"\r\nContent-Type: text/csv', ""),
+                ('Content-Disposition: form-data; name="csv_text"', csv_text),
+            ],
+        )
+        status, data, _ = self.request(
+            "POST",
+            "/assets/import",
+            body=body,
+            headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+        )
+        self.assertEqual(status, 200)
+        self.assertIn("Import complete", data)
+
+    def test_asset_import_rejects_repeated_multipart_fields(self):
+        boundary = "phase9-repeated-field"
+        body = self.multipart_body(
+            boundary,
+            [
+                ('Content-Disposition: form-data; name="csrf_token"', self.csrf_token),
+                ('Content-Disposition: form-data; name="csv_text"', "hostname,product\nfirst,Windows 11\n"),
+                ('Content-Disposition: form-data; name="csv_text"', "hostname,product\nsecond,Windows 11\n"),
+            ],
+        )
+        status, data, _ = self.request(
+            "POST",
+            "/assets/import",
+            body=body,
+            headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+        )
+        self.assertEqual(status, 400)
+        self.assertIn("Repeated form field", data)
+
+    def test_asset_import_rejects_malformed_multipart_boundary(self):
+        body = self.multipart_body(
+            "actual-boundary",
+            [
+                ('Content-Disposition: form-data; name="csrf_token"', self.csrf_token),
+                ('Content-Disposition: form-data; name="csv_text"', "hostname,product\nhost-1,Windows 11\n"),
+            ],
+        )
+        status, data, _ = self.request(
+            "POST",
+            "/assets/import",
+            body=body,
+            headers={"Content-Type": "multipart/form-data; boundary=missing-boundary"},
+        )
+        self.assertEqual(status, 400)
+        self.assertIn("Multipart boundary was not found", data)
+
+    def test_asset_import_ignores_unusual_filename(self):
+        boundary = "phase9-unusual-filename"
+        body = self.multipart_body(
+            boundary,
+            [
+                ('Content-Disposition: form-data; name="csrf_token"', self.csrf_token),
+                (
+                    'Content-Disposition: form-data; name="csv_file"; filename="../../inventory.csv"\r\n'
+                    "Content-Type: text/csv",
+                    "hostname,product\nfilename-laptop,Windows 11\n",
+                ),
+            ],
+        )
+        status, data, _ = self.request(
+            "POST",
+            "/assets/import",
+            body=body,
+            headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+        )
+        self.assertEqual(status, 200)
+        self.assertIn("Import complete", data)
 
     def test_connector_catalog_detail_and_sample_sync_render(self):
         status, catalog, _ = self.request("GET", "/connectors")

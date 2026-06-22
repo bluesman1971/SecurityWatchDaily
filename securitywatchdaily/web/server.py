@@ -66,6 +66,7 @@ from .html import badge, esc, page
 
 STATIC_DIR = Path(__file__).with_name("static")
 MAX_POST_BYTES = 2 * 1024 * 1024
+MAX_MULTIPART_BOUNDARY_BYTES = 200
 CSRF_FIELD_NAME = "csrf_token"
 
 
@@ -311,17 +312,26 @@ class SecurityWatchHandler(BaseHTTPRequestHandler):
         if not boundary_match:
             raise AppError("Upload could not be read.", detail="Missing multipart boundary.")
         boundary = boundary_match.group("boundary").strip('"').encode("utf-8")
+        if not boundary or len(boundary) > MAX_MULTIPART_BOUNDARY_BYTES or b"\r" in boundary or b"\n" in boundary:
+            raise AppError("Upload could not be read.", detail="Multipart boundary was invalid.")
+        delimiter = b"--" + boundary
+        if delimiter not in raw:
+            raise AppError("Upload could not be read.", detail="Multipart boundary was not found in the request body.")
         result: dict[str, str] = {}
-        for part in raw.split(b"--" + boundary):
+        for part in raw.split(delimiter):
             part = part.strip(b"\r\n")
             if not part or part == b"--" or b"\r\n\r\n" not in part:
                 continue
             header_blob, value = part.split(b"\r\n\r\n", 1)
             headers = header_blob.decode("utf-8", errors="replace")
+            if "content-disposition:" not in headers.casefold() or "form-data" not in headers.casefold():
+                continue
             name_match = re.search(r'name="([^"]+)"', headers)
             if not name_match:
                 continue
             name = name_match.group(1)
+            if name in result:
+                raise AppError("Upload could not be read.", detail=f"Repeated form field '{name}' is not allowed.")
             if value.endswith(b"--"):
                 value = value[:-2]
             result[name] = value.rstrip(b"\r\n").decode("utf-8-sig", errors="replace")
@@ -992,8 +1002,8 @@ def _validate_bind_mode(host: str, *, shared: bool) -> None:
         raise AppError(
             "Shared mode is not available yet.",
             detail=(
-                "Refusing to start with --shared until upload hardening, audit events, and HTTPS or reverse-proxy "
-                "deployment settings are implemented."
+                "Refusing to start with --shared until audit events and HTTPS or reverse-proxy deployment settings "
+                "are implemented."
             ),
         )
     if not _is_loopback_bind_host(host):

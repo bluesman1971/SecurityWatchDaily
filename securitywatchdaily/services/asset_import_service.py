@@ -28,6 +28,8 @@ SUPPORTED_FIELDS = {
     "last_seen",
     "component_type",
 }
+MAX_CSV_ROWS = 10_000
+MAX_FIELD_LENGTH = 255
 
 
 @dataclass(frozen=True)
@@ -57,6 +59,8 @@ def parse_inventory_csv(content: str) -> tuple[list[dict[str, str]], list[Import
         dialect = csv.Sniffer().sniff(sample)
     except csv.Error:
         dialect = csv.excel
+    if dialect.delimiter not in {",", "\t", ";"}:
+        dialect = csv.excel
     reader = csv.DictReader(io.StringIO(content), dialect=dialect)
     if not reader.fieldnames:
         return [], [ImportErrorDetail(1, "header", "CSV header row is required.")]
@@ -66,6 +70,12 @@ def parse_inventory_csv(content: str) -> tuple[list[dict[str, str]], list[Import
         errors.extend(ImportErrorDetail(1, field, "Field is not supported by the Phase 2 CSV template.") for field in unknown)
     rows: list[dict[str, str]] = []
     for row_number, row in enumerate(reader, start=2):
+        if row_number > MAX_CSV_ROWS + 1:
+            errors.append(ImportErrorDetail(row_number, "file", f"CSV imports are limited to {MAX_CSV_ROWS} data rows."))
+            break
+        if None in row:
+            errors.append(ImportErrorDetail(row_number, "row", "Row has more values than the CSV header."))
+            continue
         normalized = {normalize_header(key): (value or "").strip() for key, value in row.items() if key is not None}
         if not any(normalized.values()):
             continue
@@ -155,9 +165,7 @@ def validate_row(row_number: int, row: dict[str, str]) -> list[ImportErrorDetail
         errors.append(ImportErrorDetail(row_number, "product", "Product is required for impact matching."))
     if row.get("last_seen") and not re.match(r"^\d{4}-\d{2}-\d{2}$", row["last_seen"]):
         errors.append(ImportErrorDetail(row_number, "last_seen", "Use YYYY-MM-DD format."))
-    if len(row.get("hostname", "")) > 255:
-        errors.append(ImportErrorDetail(row_number, "hostname", "Hostname must be 255 characters or fewer."))
-    for field_name in ("vendor", "product", "platform", "version"):
-        if len(row.get(field_name, "")) > 255:
-            errors.append(ImportErrorDetail(row_number, field_name, "Value must be 255 characters or fewer."))
+    for field_name in SUPPORTED_FIELDS:
+        if len(row.get(field_name, "")) > MAX_FIELD_LENGTH:
+            errors.append(ImportErrorDetail(row_number, field_name, f"Value must be {MAX_FIELD_LENGTH} characters or fewer."))
     return errors

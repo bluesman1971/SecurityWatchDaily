@@ -35,6 +35,7 @@ Use this command from cron, launchd, Task Scheduler, or another local scheduler.
 Use the local web UI at **Connectors** to view available inventory connectors, enable or disable them, test setup, and run syncs.
 
 CSV import remains the fallback workflow. If a connector fails or a tenant API path is unclear, use **Assets > Import CSV** to keep impact matching available while connector setup is corrected.
+CSV imports are limited to 2 MB and 10,000 data rows. Each asset/import field is limited to 255 characters, repeated multipart fields are rejected, and uploaded filenames are ignored.
 
 Credentials and tenant-specific values are local environment variables, not tracked files:
 
@@ -89,4 +90,4 @@ Intune connector notes:
 - HTML responses include restrictive browser security headers, including a self-only content security policy and `Cache-Control: no-store`.
 - Non-loopback hosts such as `0.0.0.0`, `::`, or LAN addresses are rejected in local mode. The `--shared`
   flag exists as an explicit future shared-mode request, but startup still fails closed until later shared-mode
-  prerequisites such as upload hardening, audit events, and secure deployment settings are implemented.
+  prerequisites such as audit events and secure deployment settings are implemented.

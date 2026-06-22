@@ -257,6 +257,9 @@ Tests:
 
 ## Phase 9: Upload and Multipart Hardening
 
+Status: implemented. CSV imports are capped at 10,000 data rows, asset import fields are limited consistently,
+multipart requests reject malformed boundaries and repeated fields, and filenames are ignored for storage behavior.
+
 Goal: remove brittle upload parsing behavior before shared use.
 
 Implementation:

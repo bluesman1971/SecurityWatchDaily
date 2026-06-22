@@ -37,7 +37,9 @@ Route and form input is validated before unsafe conversions. Malformed asset or 
 
 Browser-facing HTML responses include a strict same-origin content security policy, disable browser caching, prevent MIME sniffing, and suppress referrer leakage. Static CSS keeps its explicit content type and `nosniff` behavior.
 
-Do not expose the app directly to a network until upload hardening, deployment settings, and logging rules are reviewed under the Strict profile.
+CSV asset imports are bounded by request size and row count, validate asset fields before storage, and reject malformed or repeated multipart form fields. Uploaded filenames are ignored and are not used for storage paths or database values.
+
+Do not expose the app directly to a network until deployment settings and logging rules are reviewed under the Strict profile.
 
 ## Architectural Decisions
 

@@ -14,7 +14,7 @@ from securitywatchdaily.repositories.assets import (
     save_product_alias,
 )
 from securitywatchdaily.repositories.runs import list_findings
-from securitywatchdaily.services.asset_import_service import import_inventory_csv, parse_inventory_csv
+from securitywatchdaily.services.asset_import_service import MAX_CSV_ROWS, import_inventory_csv, parse_inventory_csv
 from securitywatchdaily.services.asset_matching_service import (
     classify_version_match,
     refresh_asset_matches_for_run,
@@ -39,6 +39,21 @@ class AssetTests(unittest.TestCase):
     def test_csv_parser_reports_row_and_field_errors(self):
         _, errors = parse_inventory_csv("hostname,product,last_seen\n,Windows 11,2026-13-01\n")
         self.assertEqual([(error.row, error.field) for error in errors], [(2, "hostname")])
+
+    def test_csv_parser_rejects_excessive_row_count(self):
+        content = "hostname,product\n" + "".join(f"host-{index},Windows 11\n" for index in range(MAX_CSV_ROWS + 1))
+        _, errors = parse_inventory_csv(content)
+        self.assertEqual(errors[0].field, "file")
+        self.assertIn("limited", errors[0].message)
+
+    def test_csv_parser_applies_field_length_limits_consistently(self):
+        long_value = "a" * 256
+        _, errors = parse_inventory_csv(f"hostname,product,owner\nhost-1,Windows 11,{long_value}\n")
+        self.assertEqual([(error.row, error.field) for error in errors], [(2, "owner")])
+
+    def test_csv_parser_rejects_rows_with_more_values_than_headers(self):
+        _, errors = parse_inventory_csv("hostname,product\nhost-1,Windows 11,extra\n")
+        self.assertEqual([(error.row, error.field) for error in errors], [(2, "row")])
 
     def test_csv_import_normalizes_aliases_and_saves_components(self):
         conn = self.make_conn()

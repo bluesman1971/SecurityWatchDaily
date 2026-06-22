@@ -132,4 +132,23 @@ gitleaks detect --source . --no-banner --redact
 
 ## Before Network Hosting
 
-Do not expose this app directly to a network. Non-loopback binding without `--shared` is rejected, and `--shared` still fails closed until HTTPS or a reviewed reverse-proxy deployment mode is designed, documented, and tested under the Strict profile.
+Use shared mode only behind HTTPS or a reviewed reverse proxy:
+
+```bash
+python3 -m securitywatchdaily serve \
+  --host 127.0.0.1 \
+  --shared \
+  --public-url https://securitywatchdaily.example.local
+```
+
+For temporary isolated loopback testing, HTTP is allowed only with an explicit opt-in:
+
+```bash
+python3 -m securitywatchdaily serve \
+  --host 127.0.0.1 \
+  --shared \
+  --public-url http://127.0.0.1:8765 \
+  --allow-insecure-shared-testing
+```
+
+Do not use the insecure testing override on a LAN or production network.

@@ -42,7 +42,17 @@ def build_parser() -> argparse.ArgumentParser:
     serve_parser.add_argument(
         "--shared",
         action="store_true",
-        help="Request shared network mode. Requires authentication support.",
+        help="Enable reviewed shared network mode. Requires --public-url.",
+    )
+    serve_parser.add_argument(
+        "--public-url",
+        default="",
+        help="Exact browser origin for shared mode, such as https://securitywatchdaily.example.local.",
+    )
+    serve_parser.add_argument(
+        "--allow-insecure-shared-testing",
+        action="store_true",
+        help="Allow temporary HTTP shared-mode testing on loopback public URLs only.",
     )
     sub.add_parser("summary", help="Print a JSON summary of the current local state.")
     return parser
@@ -53,8 +63,21 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         if args.command == "serve":
-            server = serve(args.host, args.port, args.db, shared=args.shared)
-            print(f"SecurityWatchDaily is running at http://{args.host}:{args.port}")
+            server = serve(
+                args.host,
+                args.port,
+                args.db,
+                shared=args.shared,
+                public_url=args.public_url,
+                allow_insecure_shared_testing=args.allow_insecure_shared_testing,
+            )
+            if args.shared:
+                mode = "in insecure loopback testing mode" if args.allow_insecure_shared_testing else "behind HTTPS"
+                print(f"SecurityWatchDaily shared mode is running {mode}.")
+                print(f"Bind address: http://{args.host}:{args.port}")
+                print(f"Public URL: {server.RequestHandlerClass.context.public_url}")
+            else:
+                print(f"SecurityWatchDaily is running at http://{args.host}:{args.port}")
             server.serve_forever()
             return 0
         conn = connect(args.db)

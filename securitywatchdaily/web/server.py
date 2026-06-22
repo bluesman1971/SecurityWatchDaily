@@ -72,8 +72,18 @@ CSRF_FIELD_NAME = "csrf_token"
 
 
 class AppContext:
-    def __init__(self, db_path: Path) -> None:
+    def __init__(
+        self,
+        db_path: Path,
+        *,
+        shared: bool = False,
+        public_url: str = "",
+        allow_insecure_shared_testing: bool = False,
+    ) -> None:
         self.db_path = db_path
+        self.shared = shared
+        self.public_url = public_url.rstrip("/")
+        self.allow_insecure_shared_testing = allow_insecure_shared_testing
 
     @contextmanager
     def connection(self):
@@ -261,6 +271,8 @@ class SecurityWatchHandler(BaseHTTPRequestHandler):
         host_header = self.headers.get("Host", "")
         if not origin or not host_header:
             return False
+        if self.context.shared:
+            return origin.rstrip("/") == self.context.public_url
         parsed_origin = urlparse(origin)
         parsed_host = urlparse(f"//{host_header}")
         if parsed_origin.scheme != "http" or not parsed_origin.hostname or not parsed_host.hostname:
@@ -458,10 +470,12 @@ class SecurityWatchHandler(BaseHTTPRequestHandler):
         self.redirect("/login", headers={"Set-Cookie": self._clear_session_cookie_header()})
 
     def _session_cookie_header(self, token: str) -> str:
-        return f"{self.session_cookie_name}={token}; Path=/; HttpOnly; SameSite=Strict"
+        secure = "; Secure" if self.context.shared and not self.context.allow_insecure_shared_testing else ""
+        return f"{self.session_cookie_name}={token}; Path=/; HttpOnly; SameSite=Strict{secure}"
 
     def _clear_session_cookie_header(self) -> str:
-        return f"{self.session_cookie_name}=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict"
+        secure = "; Secure" if self.context.shared and not self.context.allow_insecure_shared_testing else ""
+        return f"{self.session_cookie_name}=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict{secure}"
 
     def admin_users(self, *, flash: str = "", error: str = "") -> None:
         current = self.current_user()
@@ -1081,14 +1095,45 @@ def _redact_error_details(details: str) -> str:
     return re.sub(r"(https?://[^/\s:@]+:)[^@\s/]+(@)", r"\1[redacted]\2", redacted)
 
 
-def _validate_bind_mode(host: str, *, shared: bool) -> None:
-    if shared:
+def _validate_public_url(public_url: str, *, allow_insecure_shared_testing: bool) -> str:
+    parsed = urlparse(public_url)
+    if parsed.scheme not in {"https", "http"} or not parsed.hostname:
         raise AppError(
-            "Shared mode is not available yet.",
-            detail=(
-                "Refusing to start with --shared until HTTPS or reverse-proxy deployment settings are implemented."
-            ),
+            "Shared mode requires a valid public URL.",
+            detail="Pass --public-url with the exact browser origin, such as https://securitywatchdaily.example.local.",
         )
+    if parsed.path not in {"", "/"} or parsed.params or parsed.query or parsed.fragment:
+        raise AppError(
+            "Shared mode public URL must be an origin only.",
+            detail="Use scheme, host, and optional port only, such as https://securitywatchdaily.example.local.",
+        )
+    if parsed.scheme == "http" and not allow_insecure_shared_testing:
+        raise AppError(
+            "Shared mode requires HTTPS.",
+            detail="Use an HTTPS public URL, or add --allow-insecure-shared-testing only for temporary isolated testing.",
+        )
+    if parsed.scheme == "http" and allow_insecure_shared_testing and not _is_loopback_bind_host(parsed.hostname):
+        raise AppError(
+            "Insecure shared testing is limited to loopback public URLs.",
+            detail="Use HTTPS for LAN or shared-network testing. Plain HTTP shared mode is only allowed for loopback testing.",
+        )
+    return f"{parsed.scheme}://{parsed.netloc}"
+
+
+def _validate_bind_mode(
+    host: str,
+    *,
+    shared: bool,
+    public_url: str = "",
+    allow_insecure_shared_testing: bool = False,
+) -> str:
+    if shared:
+        if not public_url:
+            raise AppError(
+                "Shared mode requires a public URL.",
+                detail="Pass --public-url with the exact browser origin served by HTTPS or a reviewed reverse proxy.",
+            )
+        return _validate_public_url(public_url, allow_insecure_shared_testing=allow_insecure_shared_testing)
     if not _is_loopback_bind_host(host):
         raise AppError(
             "Refusing to bind the local web UI to a non-loopback address.",
@@ -1097,6 +1142,7 @@ def _validate_bind_mode(host: str, *, shared: bool) -> None:
                 "Shared mode is blocked until the remaining security roadmap prerequisites are implemented."
             ),
         )
+    return ""
 
 
 def serve(
@@ -1105,9 +1151,21 @@ def serve(
     db_path: Path | None = None,
     *,
     shared: bool = False,
+    public_url: str = "",
+    allow_insecure_shared_testing: bool = False,
 ) -> ThreadingHTTPServer:
-    _validate_bind_mode(host, shared=shared)
-    context = AppContext(db_path or database_path())
+    validated_public_url = _validate_bind_mode(
+        host,
+        shared=shared,
+        public_url=public_url,
+        allow_insecure_shared_testing=allow_insecure_shared_testing,
+    )
+    context = AppContext(
+        db_path or database_path(),
+        shared=shared,
+        public_url=validated_public_url,
+        allow_insecure_shared_testing=allow_insecure_shared_testing,
+    )
     with context.connection() as conn:
         seed_defaults(conn, legacy_watchlist_path(context.db_path.parent))
 

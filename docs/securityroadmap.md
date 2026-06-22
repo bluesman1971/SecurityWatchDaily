@@ -307,9 +307,8 @@ Tests:
 
 ## Documentation Work
 
-Status: implemented for the local security-hardening release. Shared-mode user setup remains intentionally
-undocumented as supported because `--shared` still fails closed until HTTPS or reverse-proxy deployment settings are
-designed and tested.
+Status: implemented. Shared mode requires an explicit public URL, defaults to HTTPS/reverse-proxy use, and has a
+loopback-only insecure testing override for temporary local validation.
 
 Required docs:
 

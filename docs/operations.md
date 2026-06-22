@@ -84,12 +84,44 @@ Intune connector notes:
 - Keep source URLs public unless secret handling has been designed.
 - Do not commit generated databases, connector logs, imported asset data, customer exports, or trace/run output.
 - Keep the server bound to `127.0.0.1` for local use.
-- There is no supported shared-mode deployment yet; `--shared` intentionally fails closed until HTTPS or reverse-proxy deployment settings are designed and tested.
+- Shared mode requires `--shared` and an HTTPS `--public-url` that matches the browser origin served by your reverse proxy.
+- Temporary insecure shared testing is available only with `--allow-insecure-shared-testing` and an HTTP loopback `--public-url`; do not use it on a LAN or production network.
 - The web UI requires a local admin login. Passwords and raw session tokens are never stored in plaintext.
 - Security-sensitive web actions are recorded in local SQLite audit events without passwords, session tokens, CSRF tokens, API keys, bearer tokens, client secrets, or connector credential values.
 - Manage additional local admin users from **Admin** after creating the first bootstrap account.
 - Session cookies are `HttpOnly`, `SameSite=Strict`, and scoped to `/`. They intentionally omit `Secure` for localhost HTTP until HTTPS or reviewed shared-mode support is added.
 - HTML responses include restrictive browser security headers, including a self-only content security policy and `Cache-Control: no-store`.
-- Non-loopback hosts such as `0.0.0.0`, `::`, or LAN addresses are rejected in local mode. The `--shared`
-  flag exists as an explicit future shared-mode request, but startup still fails closed until later shared-mode
-  prerequisites such as secure deployment settings are implemented.
+- Non-loopback hosts such as `0.0.0.0`, `::`, or LAN addresses are rejected unless `--shared` is enabled with a valid public URL.
+
+## Shared Reverse Proxy
+
+Shared mode is designed to run behind an HTTPS reverse proxy. Keep the Python server on a private bind address whenever possible and let the proxy terminate TLS.
+
+Example:
+
+```bash
+python3 -m securitywatchdaily serve \
+  --host 127.0.0.1 \
+  --port 8765 \
+  --shared \
+  --public-url https://securitywatchdaily.example.local
+```
+
+For temporary isolated loopback testing only:
+
+```bash
+python3 -m securitywatchdaily serve \
+  --host 127.0.0.1 \
+  --port 8765 \
+  --shared \
+  --public-url http://127.0.0.1:8765 \
+  --allow-insecure-shared-testing
+```
+
+Reverse proxy requirements:
+
+- Terminate HTTPS before traffic reaches the browser.
+- Forward requests to the local SecurityWatchDaily bind address.
+- Preserve the browser-facing host and origin consistently with `--public-url`.
+- Do not expose the app over plain HTTP except for loopback-only testing with the explicit insecure flag.
+- Use VPN, firewall, or network controls if access should be limited to specific operators.

@@ -8,10 +8,7 @@ import re
 import sqlite3
 from dataclasses import dataclass, field
 
-from securitywatchdaily.models import Asset, AssetComponent
-from securitywatchdaily.repositories.assets import add_asset_component, replace_components_for_assets, upsert_asset
-
-from .normalization_service import normalize_pair, normalize_token, seed_product_aliases
+from .inventory_import_service import InventoryComponent, InventoryRecord, import_inventory
 
 
 SUPPORTED_FIELDS = {
@@ -43,6 +40,7 @@ class ImportErrorDetail:
 class ImportResult:
     assets_imported: int
     components_imported: int
+    matches_refreshed: int = 0
     errors: list[ImportErrorDetail] = field(default_factory=list)
 
 
@@ -86,71 +84,69 @@ def parse_inventory_csv(content: str) -> tuple[list[dict[str, str]], list[Import
 
 
 def import_inventory_csv(conn: sqlite3.Connection, content: str) -> ImportResult:
-    seed_product_aliases(conn)
     rows, errors = parse_inventory_csv(content)
     if errors:
-        return ImportResult(0, 0, errors)
+        return ImportResult(0, 0, errors=errors)
 
-    asset_ids: set[int] = set()
-    asset_count = 0
-    component_count = 0
-    for row in rows:
-        hostname = row["hostname"].strip()
-        asset = Asset(
-            id=None,
-            hostname=hostname,
-            owner=row.get("owner") or row.get("team", ""),
-            location=row.get("location", ""),
-            asset_type=row.get("asset_type") or row.get("type", ""),
-            platform=normalize_token(row.get("platform", "")),
-            last_seen=row.get("last_seen", ""),
-        )
-        asset_id = upsert_asset(conn, asset)
-        if asset_id not in asset_ids:
-            asset_count += 1
-        asset_ids.add(asset_id)
+    records, record_rows = _group_rows_into_records(rows)
+    result = import_inventory(conn, records)
+    if result.errors:
+        return ImportResult(0, 0, errors=_translate_errors(result.errors, record_rows))
+    return ImportResult(result.assets_imported, result.components_imported, matches_refreshed=result.matches_refreshed)
 
-    replace_components_for_assets(conn, asset_ids)
-    for row in rows:
-        vendor = row.get("vendor", "")
-        product = row.get("product", "")
-        if not product:
-            continue
-        asset_id = upsert_asset(
-            conn,
-            Asset(
-                id=None,
-                hostname=row["hostname"],
-                owner=row.get("owner") or row.get("team", ""),
-                location=row.get("location", ""),
-                asset_type=row.get("asset_type") or row.get("type", ""),
-                platform=normalize_token(row.get("platform", "")),
-                last_seen=row.get("last_seen", ""),
-            ),
-        )
-        normalized_vendor, normalized_product, normalized_platform = normalize_pair(
-            conn,
-            vendor,
-            product,
-            row.get("platform", ""),
-        )
-        add_asset_component(
-            conn,
-            AssetComponent(
-                id=None,
-                asset_id=asset_id,
-                component_type=normalize_token(row.get("component_type") or "software"),
-                vendor=vendor,
-                product=product,
+
+def _group_rows_into_records(rows: list[dict[str, str]]) -> tuple[list[InventoryRecord], list[list[int]]]:
+    """Collapse flat CSV rows into one InventoryRecord per hostname, since rows
+    that share a hostname are components of the same asset. Returns the records
+    and, parallel to them, the source row numbers of each record's components so
+    errors can be reported against the original spreadsheet row."""
+    order: list[str] = []
+    assets: dict[str, dict[str, str]] = {}
+    components: dict[str, list[InventoryComponent]] = {}
+    source_rows: dict[str, list[int]] = {}
+    for offset, row in enumerate(rows):
+        hostname = row.get("hostname", "").strip()
+        if hostname not in assets:
+            order.append(hostname)
+            components[hostname] = []
+            source_rows[hostname] = []
+        assets[hostname] = row
+        components[hostname].append(
+            InventoryComponent(
+                component_type=row.get("component_type", ""),
+                vendor=row.get("vendor", ""),
+                product=row.get("product", ""),
                 version=row.get("version", ""),
-                platform=normalized_platform,
-                normalized_vendor=normalized_vendor,
-                normalized_product=normalized_product,
-            ),
+                platform=row.get("platform", ""),
+            )
         )
-        component_count += 1
-    conn.commit()
-    return ImportResult(asset_count, component_count, [])
+        source_rows[hostname].append(offset + 2)
+    records = [
+        InventoryRecord(
+            hostname=assets[hostname]["hostname"],
+            owner=assets[hostname].get("owner") or assets[hostname].get("team", ""),
+            location=assets[hostname].get("location", ""),
+            asset_type=assets[hostname].get("asset_type") or assets[hostname].get("type", ""),
+            platform=assets[hostname].get("platform", ""),
+            last_seen=assets[hostname].get("last_seen", ""),
+            components=components[hostname],
+        )
+        for hostname in order
+    ]
+    return records, [source_rows[hostname] for hostname in order]
+
+
+def _translate_errors(errors, record_rows: list[list[int]]) -> list[ImportErrorDetail]:
+    """Map record/component indexes from the import core back to CSV row numbers."""
+    translated: list[ImportErrorDetail] = []
+    for error in errors:
+        rows_for_record = record_rows[error.record_index]
+        if error.component_index is not None and 1 <= error.component_index <= len(rows_for_record):
+            row_number = rows_for_record[error.component_index - 1]
+        else:
+            row_number = rows_for_record[0] if rows_for_record else error.record_index + 2
+        translated.append(ImportErrorDetail(row_number, error.field, error.message))
+    return translated
 
 
 def normalize_header(value: str | None) -> str:

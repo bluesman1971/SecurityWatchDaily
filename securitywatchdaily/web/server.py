@@ -48,7 +48,6 @@ from securitywatchdaily.repositories.connectors import (
 from securitywatchdaily.repositories.runs import get_finding, latest_run, list_findings, list_runs
 from securitywatchdaily.repositories.sources import list_sources, save_source, set_source_enabled
 from securitywatchdaily.services.asset_import_service import csv_template, import_inventory_csv
-from securitywatchdaily.services.asset_matching_service import refresh_asset_matches_for_run
 from securitywatchdaily.services.connector_service import (
     INTUNE_CLOUDS,
     INTUNE_PERMISSION,
@@ -978,8 +977,7 @@ class SecurityWatchHandler(BaseHTTPRequestHandler):
         csv_content = (form.get("csv_file") or "").strip() or (form.get("csv_text") or "").strip()
         with self.context.connection() as conn:
             result = import_inventory_csv(conn, csv_content)
-            run = latest_run(conn)
-            match_count = refresh_asset_matches_for_run(conn, run.run_id) if run and not result.errors else 0
+        match_count = result.matches_refreshed
         if result.errors:
             rows = "".join(
                 f"<tr><td>{error.row}</td><td>{esc(error.field)}</td><td>{esc(error.message)}</td></tr>"

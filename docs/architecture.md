@@ -19,7 +19,7 @@ SecurityWatchDaily is split into small modules so collection, matching, storage,
 4. Findings are deduplicated by key.
 5. Trace state suppresses unchanged findings.
 6. Runs and findings are saved for local review.
-7. CSV imports and connector syncs map inventory into `assets` and `asset_components`.
+7. CSV imports and connector syncs translate their inputs into neutral inventory records and apply them through the shared inventory import module, which maps them into `assets` and `asset_components`.
 8. Finding products and asset matches are refreshed from the saved run data and current inventory.
 9. The web UI reads the same database as the CLI.
 
@@ -31,7 +31,9 @@ Connector credentials are secrets. They are read from local environment variable
 
 External collector fetches and connector setup checks use the shared safe HTTP helper in `collectors/http.py`. That path allows HTTPS URLs, resolves hostnames before connecting, blocks loopback, private, link-local, multicast, IPv6 unique-local/link-local, unspecified, and cloud metadata addresses, disables proxy use for these fetches, and does not follow redirects. External feed bodies are read in chunks with a 5 MB cap and a 20-second default request timeout. Freshservice setup checks may send a local Basic Authorization header to the validated tenant URL, but connector errors must not include encoded tokens or raw secret values.
 
-The local web UI requires an admin login. Admin passwords are stored only as salted PBKDF2-SHA256 password hashes in SQLite. Web access uses cryptographically random server-side session tokens. Only token hashes are stored in SQLite, and protected routes validate the cookie token against the `sessions` table on every request. Login replaces prior sessions for the admin user, logout deletes the active session row, idle sessions expire after 8 hours, and absolute session lifetime is 24 hours. Each authenticated session also has a server-side CSRF token that is rendered into authenticated POST forms. Authenticated POST requests must present that CSRF token and an `Origin` header matching the same local app origin.
+The only collector that parses XML is the Ubuntu Security Notice RSS collector. It rejects any feed body containing a DTD/`DOCTYPE` declaration before parsing, then parses with the standard-library `xml.etree.ElementTree`. Because the standard-library parser does not resolve external entities and custom entities cannot be defined without a DTD, this closes entity-expansion ("billion laughs") denial-of-service from a malicious or compromised feed while keeping the runtime standard-library-only (no `defusedxml` dependency). The behavior is regression-tested in `tests/test_collectors_ubuntu.py`.
+
+The local web UI requires an admin login. Admin passwords are stored only as salted PBKDF2-SHA256 password hashes in SQLite. Login verifies an unknown or non-admin username against a constant decoy hash so authentication response time does not reveal whether a username exists, preventing user enumeration through a timing side channel. Web access uses cryptographically random server-side session tokens. Only token hashes are stored in SQLite, and protected routes validate the cookie token against the `sessions` table on every request. Login replaces prior sessions for the admin user, logout deletes the active session row, idle sessions expire after 8 hours, and absolute session lifetime is 24 hours. Each authenticated session also has a server-side CSRF token that is rendered into authenticated POST forms. Authenticated POST requests must present that CSRF token and an `Origin` header matching the same local app origin.
 
 Route and form input is validated before unsafe conversions. Malformed asset or finding IDs return safe client errors, invalid numeric form fields return actionable validation messages, and unexpected web handler failures render a generic 500 page without exception types, stack traces, internal paths, raw credentialed URLs, or token-like values.
 
@@ -103,6 +105,12 @@ Planned phase 2 entities:
 The UI should show match confidence rather than treating every product-name match as confirmed impact.
 
 The current matching flow stores normalized product aliases, inferred finding products, optional structured version ranges, and materialized finding-asset matches. Product-only matches are labeled as likely affected, missing asset versions with known ranges are labeled as needs review, and structured version hits can become confirmed affected or not affected.
+
+### Single inventory import path
+
+CSV import and connector sync share one inventory import module. Each source is responsible only for turning its own format into neutral inventory records (one asset plus its components, with an optional connector external id); the import module owns everything after that: grouping, asset upsert, component replacement, normalization, connector mapping, and the impact-match refresh. Adding a future connector means writing a translator to inventory records, not re-implementing the import.
+
+Import is all-or-nothing. If any record in a batch fails validation the module writes nothing and returns every error, so a partial failure never leaves half-imported inventory. Each source then translates the neutral errors back into its own terms — CSV into spreadsheet row numbers, connectors into external-id rows persisted against the sync run. See `CONTEXT.md` for the inventory vocabulary.
 
 ### Connector catalog for phase 3
 

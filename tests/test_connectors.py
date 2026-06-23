@@ -200,7 +200,7 @@ class ConnectorTests(unittest.TestCase):
             conn,
             ConnectorSyncRun(None, "sample_inventory", "2026-06-22T00:00:00Z", status="running"),
         )
-        asset_count, component_count, errors = import_connector_records(
+        asset_count, component_count, match_count, errors = import_connector_records(
             conn,
             "sample_inventory",
             sync_run_id,
@@ -215,6 +215,7 @@ class ConnectorTests(unittest.TestCase):
         saved_errors = list_import_errors(conn, sync_run_id)
         self.assertEqual(asset_count, 0)
         self.assertEqual(component_count, 0)
+        self.assertEqual(match_count, 0)
         self.assertEqual(len(errors), 2)
         self.assertEqual(len(saved_errors), 2)
         self.assertEqual(saved_errors[0]["connector_id"], "sample_inventory")

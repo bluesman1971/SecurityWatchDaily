@@ -15,26 +15,23 @@ from urllib.parse import urljoin, urlparse
 from securitywatchdaily.collectors.http import open_external_url, read_external_response
 from securitywatchdaily.errors import AppError, ConfigValidationError
 from securitywatchdaily.models import (
-    Asset,
-    AssetComponent,
     Connector,
-    ConnectorAssetMapping,
     ConnectorImportError,
     ConnectorSyncRun,
 )
-from securitywatchdaily.repositories.assets import add_asset_component, replace_components_for_assets, upsert_asset
 from securitywatchdaily.repositories.connectors import (
     add_import_error,
     add_sync_run,
     finish_sync_run,
     get_connector,
-    save_asset_mapping,
     save_connector,
     update_connector_settings,
 )
-from securitywatchdaily.repositories.runs import latest_run
-from securitywatchdaily.services.asset_matching_service import refresh_asset_matches_for_run
-from securitywatchdaily.services.normalization_service import normalize_pair, normalize_token, seed_product_aliases
+from securitywatchdaily.services.inventory_import_service import (
+    InventoryComponent,
+    InventoryRecord,
+    import_inventory,
+)
 
 
 MAX_FIELD_LENGTH = 255
@@ -218,7 +215,7 @@ def sync_connector(conn: sqlite3.Connection, connector_id: str) -> ConnectorActi
         if not connector.enabled:
             raise ConfigValidationError("Connector is disabled.", detail="Enable the connector before syncing it.")
         records = collect_records(connector)
-        asset_count, component_count, validation_errors = import_connector_records(
+        asset_count, component_count, match_count, validation_errors = import_connector_records(
             conn,
             connector.id,
             sync_run_id,
@@ -229,8 +226,6 @@ def sync_connector(conn: sqlite3.Connection, connector_id: str) -> ConnectorActi
                 "Connector data needs review.",
                 detail=f"{len(validation_errors)} imported records failed validation. Review the sync errors below.",
             )
-        run = latest_run(conn)
-        match_count = refresh_asset_matches_for_run(conn, run.run_id) if run else 0
         finished_at = utc_now()
         finish_sync_run(
             conn,
@@ -358,112 +353,56 @@ def import_connector_records(
     connector_id: str,
     sync_run_id: int,
     records: list[ConnectorAssetRecord],
-) -> tuple[int, int, list[ImportValidationError]]:
-    seed_product_aliases(conn)
-    validation_errors: list[ImportValidationError] = []
-    asset_ids: set[int] = set()
-    imported_assets: list[tuple[ConnectorAssetRecord, int]] = []
-    component_count = 0
-    for record in records:
-        errors = validate_record(record)
-        if errors:
-            validation_errors.extend(errors)
-            for error in errors:
-                add_import_error(
-                    conn,
-                    ConnectorImportError(
-                        None,
-                        sync_run_id,
-                        connector_id,
-                        error.external_id,
-                        error.field,
-                        error.message,
-                    ),
-                )
-            continue
-        asset_id = upsert_asset(
+) -> tuple[int, int, int, list[ImportValidationError]]:
+    """Connector adapter over the inventory import core: translate connector
+    records into InventoryRecords, import them under all-or-nothing validation,
+    persist any errors against the sync run, and return counts plus the errors."""
+    inventory_records = [_to_inventory_record(record) for record in records]
+    result = import_inventory(conn, inventory_records, connector_id=connector_id)
+    errors = [
+        ImportValidationError(
+            records[error.record_index].external_id,
+            _connector_field_name(error),
+            error.message,
+        )
+        for error in result.errors
+    ]
+    for error in errors:
+        add_import_error(
             conn,
-            Asset(
-                id=None,
-                hostname=record.hostname.strip(),
-                owner=record.owner.strip(),
-                location=record.location.strip(),
-                asset_type=normalize_token(record.asset_type),
-                platform=normalize_token(record.platform),
-                last_seen=record.last_seen.strip(),
-            ),
+            ConnectorImportError(None, sync_run_id, connector_id, error.external_id, error.field, error.message),
         )
-        asset_ids.add(asset_id)
-        imported_assets.append((record, asset_id))
-        save_asset_mapping(conn, ConnectorAssetMapping(None, connector_id, record.external_id.strip(), asset_id))
-
-    replace_components_for_assets(conn, asset_ids)
-    for record, asset_id in imported_assets:
-        for component in record.components:
-            normalized_vendor, normalized_product, normalized_platform = normalize_pair(
-                conn,
-                component.vendor,
-                component.product,
-                component.platform or record.platform,
-            )
-            add_asset_component(
-                conn,
-                AssetComponent(
-                    id=None,
-                    asset_id=asset_id,
-                    component_type=normalize_token(component.component_type or "software"),
-                    vendor=component.vendor.strip(),
-                    product=component.product.strip(),
-                    version=component.version.strip(),
-                    platform=normalized_platform,
-                    normalized_vendor=normalized_vendor,
-                    normalized_product=normalized_product,
-                ),
-            )
-            component_count += 1
-    conn.commit()
-    return len(imported_assets), component_count, validation_errors
+    if errors:
+        conn.commit()
+    return result.assets_imported, result.components_imported, result.matches_refreshed, errors
 
 
-def validate_record(record: ConnectorAssetRecord) -> list[ImportValidationError]:
-    errors: list[ImportValidationError] = []
-    external_id = record.external_id[:MAX_FIELD_LENGTH]
-    if not record.external_id.strip():
-        errors.append(
-            ImportValidationError(
-                external_id,
-                "external_id",
-                "External ID is required for connector mapping.",
+def _to_inventory_record(record: ConnectorAssetRecord) -> InventoryRecord:
+    return InventoryRecord(
+        hostname=record.hostname,
+        owner=record.owner,
+        location=record.location,
+        asset_type=record.asset_type,
+        platform=record.platform,
+        last_seen=record.last_seen,
+        external_id=record.external_id,
+        components=[
+            InventoryComponent(
+                component_type=component.component_type,
+                vendor=component.vendor,
+                product=component.product,
+                version=component.version,
+                platform=component.platform,
             )
-        )
-    if not record.hostname.strip():
-        errors.append(ImportValidationError(external_id, "hostname", "Hostname is required."))
-    if record.last_seen and not re.match(r"^\d{4}-\d{2}-\d{2}$", record.last_seen):
-        errors.append(ImportValidationError(external_id, "last_seen", "Use YYYY-MM-DD format."))
-    for field_name in ("external_id", "hostname", "owner", "location", "asset_type", "platform", "last_seen"):
-        if len(getattr(record, field_name, "")) > MAX_FIELD_LENGTH:
-            errors.append(ImportValidationError(external_id, field_name, "Value must be 255 characters or fewer."))
-    if not record.components:
-        errors.append(
-            ImportValidationError(
-                external_id,
-                "components",
-                "At least one component is required for impact matching.",
-            )
-        )
-    for index, component in enumerate(record.components, start=1):
-        if not component.product.strip():
-            errors.append(ImportValidationError(external_id, f"components[{index}].product", "Product is required."))
-        for field_name in ("component_type", "vendor", "product", "version", "platform"):
-            if len(getattr(component, field_name, "")) > MAX_FIELD_LENGTH:
-                errors.append(
-                    ImportValidationError(
-                        external_id,
-                        f"components[{index}].{field_name}",
-                        "Value must be 255 characters or fewer.",
-                    )
-                )
-    return errors
+            for component in record.components
+        ],
+    )
+
+
+def _connector_field_name(error) -> str:
+    if error.component_index is not None:
+        return f"components[{error.component_index}].{error.field}"
+    return error.field
 
 
 def validate_freshservice_setup() -> None:

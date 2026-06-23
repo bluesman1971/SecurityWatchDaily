@@ -19,7 +19,7 @@ SecurityWatchDaily is split into small modules so collection, matching, storage,
 4. Findings are deduplicated by key.
 5. Trace state suppresses unchanged findings.
 6. Runs and findings are saved for local review.
-7. CSV imports and connector syncs map inventory into `assets` and `asset_components`.
+7. CSV imports and connector syncs translate their inputs into neutral inventory records and apply them through the shared inventory import module, which maps them into `assets` and `asset_components`.
 8. Finding products and asset matches are refreshed from the saved run data and current inventory.
 9. The web UI reads the same database as the CLI.
 
@@ -105,6 +105,12 @@ Planned phase 2 entities:
 The UI should show match confidence rather than treating every product-name match as confirmed impact.
 
 The current matching flow stores normalized product aliases, inferred finding products, optional structured version ranges, and materialized finding-asset matches. Product-only matches are labeled as likely affected, missing asset versions with known ranges are labeled as needs review, and structured version hits can become confirmed affected or not affected.
+
+### Single inventory import path
+
+CSV import and connector sync share one inventory import module. Each source is responsible only for turning its own format into neutral inventory records (one asset plus its components, with an optional connector external id); the import module owns everything after that: grouping, asset upsert, component replacement, normalization, connector mapping, and the impact-match refresh. Adding a future connector means writing a translator to inventory records, not re-implementing the import.
+
+Import is all-or-nothing. If any record in a batch fails validation the module writes nothing and returns every error, so a partial failure never leaves half-imported inventory. Each source then translates the neutral errors back into its own terms — CSV into spreadsheet row numbers, connectors into external-id rows persisted against the sync run. See `CONTEXT.md` for the inventory vocabulary.
 
 ### Connector catalog for phase 3
 

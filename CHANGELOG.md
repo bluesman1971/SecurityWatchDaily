@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Changed
+
+- Unified CSV import and connector sync onto a single inventory import module (`services/inventory_import_service.py`). CSV parsing and connector collection are now thin adapters that translate their formats into neutral inventory records; the two-phase asset/component write, connector mapping, and post-import impact-match refresh live in one place. Import is now all-or-nothing for both paths: if any record in a batch fails validation, nothing is written and every error is reported at once. The web import handler no longer orchestrates the match refresh. Added `tests/test_inventory_import.py` and a project `CONTEXT.md` defining the inventory vocabulary.
+
 ### Security
 
 - Hardened the Ubuntu RSS collector against XML entity-expansion ("billion laughs") denial-of-service by rejecting feeds that declare a DTD/`DOCTYPE` before parsing. Kept dependency-free (no `defusedxml`) to preserve the standard-library-only runtime posture. Covered by `tests/test_collectors_ubuntu.py`.

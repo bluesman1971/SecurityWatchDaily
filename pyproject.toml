@@ -8,7 +8,7 @@ requires-python = ">=3.11"
 dev = [
   "pip-audit==2.10.1",
   "ruff==0.15.18",
-  "semgrep==1.167.0",
+  "semgrep==1.168.0",
 ]
 
 [tool.ruff]
